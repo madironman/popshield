@@ -15,7 +15,7 @@ one.
 - <a id="attribute"></a>**Attribute.** Extra information inside an HTML tag, such as `href="..."` or `target="_blank"`. [Part 0](00-basics.md#1-what-a-web-page-is-made-of)
 - <a id="backstop"></a>**Backstop.** The service worker's safety net: it closes any new tab that has no fitting ticket. [Part III](03-popshield.md#5-tickets-for-new-tabs)
 - <a id="baseline"></a>**Baseline.** The test run without PopShield, which must show the attack working. [Part V](05-contributing.md#2-running-the-tests)
-- <a id="beforeunload"></a>**`beforeunload`.** An event a page gets just before it is left; cancelling it makes Chrome ask "Leave site?". [Part III](03-popshield.md#hijacks-from-an-embedded-frame)
+- <a id="beforeunload"></a>**`beforeunload`.** An event a page gets just before it is left; a page that cancels it makes Chrome ask whether you really want to leave. PopShield used to rely on it and no longer does. [Part IV](04-decisions.md#29-undoing-a-frame-takeover-instead-of-asking)
 - <a id="bridge"></a>**Bridge.** `src/bridge.js`, PopShield's script in the isolated world. It makes every decision, issues tickets and runs the redirect guards. [Part III](03-popshield.md#4-asking-through-the-wall)
 - <a id="browser"></a>**Browser.** The program that fetches and shows web pages: Chrome, Edge, Brave and so on. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
 - <a id="bubble"></a>**Bubble phase.** The part of an event's trip where it travels back up from the clicked element to `window`. See *event phase*.
@@ -41,6 +41,7 @@ one.
 - <a id="fingerprinting"></a>**Fingerprinting.** Recognising a browser by collecting many small details about it, such as which extensions it seems to have. Pages can notice PopShield, so it is one such detail. [Part III](03-popshield.md#6-what-popshield-remembers-and-what-it-forgets)
 - <a id="form-swap"></a>**Form swap.** A script re-wiring the button you pressed (to another form, or to send it somewhere else) between your press and your click. PopShield refuses that submit (`form-swapped`). [Part III](03-popshield.md#clicks-and-forms-faked-by-scripts)
 - <a id="frame"></a>**Frame (iframe).** A complete page shown inside another page. [Part 0](00-basics.md#3-pages-inside-pages)
+- <a id="frame-takeover"></a>**Frame takeover.** A frame embedded from another site sending the whole tab somewhere else (`top.location = ...`) right after you press inside it. PopShield's service worker sends the tab back. [Part III](03-popshield.md#hijacks-from-an-embedded-frame)
 - <a id="framework"></a>**Framework.** A ready-made toolkit for building websites, such as React, Solid or jQuery. [Part III](03-popshield.md#frameworks-that-delegate-clicks)
 - <a id="hook"></a>**Hook.** PopShield's replacement for a browser tool such as `window.open`, which asks the bridge before calling the real one. [Part III](03-popshield.md#2-following-one-click-from-start-to-finish)
 - <a id="html"></a>**HTML.** The language that describes a page's structure: headings, buttons, links. [Part 0](00-basics.md#1-what-a-web-page-is-made-of)

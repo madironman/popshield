@@ -68,8 +68,8 @@ command the project named "test", which starts the test programs.
 - `test/run.mjs`, the **end-to-end** suite. For every scenario it opens a test
   page in real Chromium, clicks like a person (with trusted events), and
   checks the outcome, first without PopShield (the baseline) and then with it.
-  There are 120 scenarios. Counting each baseline run and each PopShield run
-  as one check (mode-only cases have no baseline), that's 223 checks that
+  There are 121 scenarios. Counting each baseline run and each PopShield run
+  as one check (mode-only cases have no baseline), that's 225 checks that
   decide pass or fail, plus one known bypass that is only reported (below).
   The run takes about 50 seconds because many browsers work in parallel.
 - `test/popup-ui.mjs`, which triggers real blocks and then checks the popup:
@@ -110,7 +110,7 @@ PopShield still lets it through, as expected; `FIXD` means a change now blocks
 it, and the case's `knownBypass` flag should be removed. Neither fails the
 run. Today there is one: Smart mode's patient redirect (`rt-delayed-redirect`,
 see [Part IV](04-decisions.md#24-smart-and-strict-one-honest-trade-off)). The
-last line counts only the other checks: `223/223 checks passed` means all is
+last line counts only the other checks: `225/225 checks passed` means all is
 well.
 
 Everything above happens on your own computer. The test pages are local
@@ -180,25 +180,29 @@ PopShield. From the top:
 7. `onSubmit()`: the form guard (same-task rule, and no button re-wired since
    the press);
 8. top frame only: `frameJustClicked()`, the `tabState` question to the worker,
-   the `navigate` listener with `redirectReason()` (redirect guard; the
+   and the `navigate` listener with `redirectReason()` (redirect guard; the
    sign-in/payment exemption comes after the tab-under, popup-hijack and
-   Strict checks) and
-   `onBeforeUnload()` (embedded-frame hijack).
+   Strict checks). The embedded-frame hijack isn't handled here: `onGesture()`
+   only reports presses (`topGesture` / `frameGesture`) and whole-tab link
+   clicks inside frames (`frameTopLink`) to the worker.
 
 **[`src/background.js`](../../src/background.js)** (service worker):
 constants (ticket lifetimes, limits), the whitelists of kinds and reasons,
 rate limits, tickets (`addToken`, `tokenFits`, `takeToken`,
 `takeSwappedLink`), the redirect-chain follower's state (`tabWatch`,
 `navWatch`, `landingOk`, `isRedirectHop`), the per-tab "opened a tab at"
-memory (`newTabAt`) and the "opened on weak evidence" set (`weakTabs`), the per-tab list (`logBlocked`, `flushLog`, `clearTab`), the
+memory (`newTabAt`) and the "opened on weak evidence" set (`weakTabs`), the
+frame-takeover check (`checkFrameTakeover`, with its press times and
+`frameTopLink` memory), the per-tab list (`logBlocked`, `flushLog`, `clearTab`), the
 anonymous counter (`bumpStatsMany`), the message handler (including
 `getMode` for incognito pages), the backstop
-(`onCreatedNavigationTarget`), the chain follower and cleanup
-(`onCommitted`), cleanup when a tab closes, and the welcome page on install.
+(`onCreatedNavigationTarget`), the frame-takeover check, chain follower and
+cleanup (`onCommitted`), cleanup when a tab closes, and the welcome page on install.
 
 **[`src/popup.js`](../../src/popup.js)**: the counter and bar chart, Reset
-stats, the mode buttons, the list with Open buttons, and the Report and
-Feedback links.
+stats, the mode buttons, the list with Open buttons, the Report and Feedback
+links, and the small confirmation panel that Reset and Report show inside the
+popup before they act.
 
 **[`test/fixtures/scenario.js`](../../test/fixtures/scenario.js)** and
 **[`test/run.mjs`](../../test/run.mjs)**: every scenario, and the table of
@@ -406,8 +410,10 @@ Still blocked. The page swapped the tool in its own world; the bridge reads
 Read `test/fixtures/player.html` (`?mode=top`), the fixture that stands in
 for a widget embedded from another site, and the
 `player-iframe-top-redirect` case. Write down, in order, every file and
-function your press inside the frame passes through until "Leave site?"
-appears. Compare with the diagram in
+function your press inside the frame passes through, and then every step the
+service worker takes after the tab lands on the ad page, until the tab is
+back on the original page. Then do the same for `legit-frame-top-link` and
+find the exact line that lets that one through. Compare with the diagram in
 [Part III](03-popshield.md#hijacks-from-an-embedded-frame).
 
 ### In your own browser
@@ -436,6 +442,7 @@ Chrome extensions:
 - [Extension service workers](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers)
 - [Message passing](https://developer.chrome.com/docs/extensions/develop/concepts/messaging)
 - [`chrome.webNavigation`](https://developer.chrome.com/docs/extensions/reference/api/webNavigation),
+  [`chrome.tabs.goBack`](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-goBack),
   [`chrome.storage`](https://developer.chrome.com/docs/extensions/reference/api/storage),
   [`chrome.dom`](https://developer.chrome.com/docs/extensions/reference/api/dom)
 
@@ -447,7 +454,6 @@ The web platform:
 - [`Event.isTrusted`](https://developer.mozilla.org/en-US/docs/Web/API/Event/isTrusted),
   [`Event.currentTarget`](https://developer.mozilla.org/en-US/docs/Web/API/Event/currentTarget),
   [`Event.composedPath()`](https://developer.mozilla.org/en-US/docs/Web/API/Event/composedPath)
-- [`beforeunload` (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)
 - [V8 stack trace API](https://v8.dev/docs/stack-trace-api) and
   [Faster async functions and promises](https://v8.dev/blog/fast-async)
 - [Document Picture-in-Picture](https://developer.chrome.com/docs/web-platform/document-picture-in-picture)

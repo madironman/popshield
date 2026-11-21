@@ -25,10 +25,10 @@ source of truth; if this file disagrees with it, the code wins.
 | Component | World / context | Runs where | Responsibility |
 |---|---|---|---|
 | `src/inject.js` | Content script, `world: "MAIN"` | every frame, `document_start`, `match_origin_as_fallback` | **Hooks only.** Wraps the APIs that open tabs (`window.open`, `HTMLElement.prototype.click`, `EventTarget.prototype.dispatchEvent` for clicks on HTML and SVG links, `HTMLFormElement.prototype.submit`, `documentPictureInPicture.requestWindow`) in its own realm and in same-origin child realms, and synchronously **asks the bridge** for a verdict. Supplies two hints: framework attribution and async origin. Decides nothing. |
-| `src/bridge.js` | Content script, isolated world | every frame, `document_start`, `match_origin_as_fallback` | **The decision maker.** Tracks trusted gestures with clean APIs, snapshots the page's geometry when each gesture starts, judges every ask, mints every allow token (bound to a URL), blocks overlay / ad-box link clicks, judges native `_blank` form submits, and in the top frame runs the Navigation API redirect guard and the `beforeunload` embedded-frame guard. Writes the block log (rate-limited) through the background. |
+| `src/bridge.js` | Content script, isolated world | every frame, `document_start`, `match_origin_as_fallback` | **The decision maker.** Tracks trusted gestures with clean APIs, snapshots the page's geometry when each gesture starts, judges every ask, mints every allow token (bound to a URL), blocks overlay / ad-box link clicks, judges native `_blank` form submits, and in the top frame runs the Navigation API redirect guard. In every frame it reports presses to the background (`topGesture` / `frameGesture`), and in child frames a click on a real `target=_top` / `_parent` link (`frameTopLink`). Writes the block log (rate-limited) through the background. |
 | `src/common.js` | Shared (`PS` global) | isolated world, worker (`importScripts`), popup | `siteOf`, `siteOfUrl`, settings read/write (`getSettings`, `getMode`, `setSiteMode`, `setDefaultMode`), the exact sign-in/payment flow list `PROVIDER_FLOWS` and `isProviderFlow(url)`; incognito per-site modes in `chrome.storage.session` |
-| `src/background.js` | Service worker | once per profile | Trusts only bridge messages. Allow tokens (TTL, cap, URL binding, exact-page binding for link clicks), the new-tab **backstop** (including link-swap repair), the **redirect-chain follower**, the per-tab "opened a tab at" memory for tab-under detection, the "opened on weak evidence" flag for new tabs, `getMode` answers for incognito pages, per-tab block log and badge, local lifetime stats, frame-gesture relay, `frameOverlay`, welcome page on first install |
-| `src/popup.*` | Extension page | toolbar popup | Lifetime counter and 14-day sparkline, Reset stats, per-site mode, default mode, blocked list with **Open**, Report buttons (confirmation first; hidden in incognito, see [What leaves the browser](#what-leaves-the-browser)), Feedback link |
+| `src/background.js` | Service worker | once per profile | Trusts only bridge messages. Allow tokens (TTL, cap, URL binding, exact-page binding for link clicks), the new-tab **backstop** (including link-swap repair), the **redirect-chain follower**, the per-tab "opened a tab at" memory for tab-under detection, the "opened on weak evidence" flag for new tabs, `getMode` answers for incognito pages, per-tab block log and badge, local lifetime stats, frame-gesture relay, the **frame-takeover check** (sends the tab back when an embedded frame takes it over), `frameOverlay`, welcome page on first install |
+| `src/popup.*` | Extension page | toolbar popup | Lifetime counter and 14-day sparkline, Reset stats, per-site mode, default mode, blocked list with **Open**, Report buttons (Reset and Report are confirmed in a panel inside the popup, not a browser dialog; hidden in incognito, see [What leaves the browser](#what-leaves-the-browser)), Feedback link |
 | `src/welcome.html` | Extension page | opened once, on first install | Static introduction: what is blocked, modes, privacy |
 
 Permissions: `storage`, `webNavigation`, host `<all_urls>` (needed to inject at
@@ -54,7 +54,7 @@ flowchart LR
   PG -- "window.open, click(), submit()" --> I
   I -- "ask over nonce channel" --> B
   B -- "verdict" --> I
-  B -- "allow / blocked / frameGesture / frameOverlay / tabState / watchNav / getMode" --> BG
+  B -- "allow / blocked / topGesture / frameGesture / frameTopLink / frameOverlay / tabState / watchNav / getMode" --> BG
   BG -- "frameGesture / newTab (top frame only)" --> B
   BG -- "closes un-tokened new tabs, follows chains" --> X(("tabs"))
   BG -- "log, count, stats" --> S
@@ -66,7 +66,7 @@ flowchart LR
 |---|---|---|
 | Page -> `inject.js` | calls to hooked APIs | nothing is trusted; `inject.js` uses built-ins captured before any page script ran |
 | `inject.js` -> `bridge.js` | `ask` (kind, URL, async hint) and `fw` (framework depth) over `ps-<nonce>-up` | the kind must be one of `popup`, `scripted-link`, `scripted-form`; the bridge re-derives the gesture itself from its own listener and treats both hints as untrusted input that can only *relax* a check in narrow, bounded ways, and marks the resulting token `weak` |
-| `bridge.js` -> `background.js` | `allow`, `blocked`, `frameGesture`, `frameOverlay`, `tabState`, `watchNav`, `getMode` via `chrome.runtime.sendMessage` | `sender.id` is PopShield, `sender.tab` exists; `how`, `kind` and `reason` are whitelisted; per-tab rate limits; `frameUrl` comes from `sender.url`, not the message; `tabState`, `watchNav` and `frameOverlay` are honoured only from `frameId` 0, `frameGesture` only from other frames; `watchNav`'s `also` host counts only if it is itself a provider flow; `getMode` answers for the sender tab's own incognito state |
+| `bridge.js` -> `background.js` | `allow`, `blocked`, `topGesture`, `frameGesture`, `frameTopLink`, `frameOverlay`, `tabState`, `watchNav`, `getMode` via `chrome.runtime.sendMessage` | `sender.id` is PopShield, `sender.tab` exists; `how`, `kind` and `reason` are whitelisted; per-tab rate limits; `frameUrl` comes from `sender.url`, not the message; `tabState`, `watchNav`, `topGesture` and `frameOverlay` are honoured only from `frameId` 0, `frameGesture` and `frameTopLink` only from other frames; `frameTopLink` URLs are capped at 2000 characters; `watchNav`'s `also` host counts only if it is itself a provider flow; `getMode` answers for the sender tab's own incognito state |
 | `background.js` -> top frame | `frameGesture` relay, `newTab` notice | sent only to `frameId: 0` of the same tab |
 
 The page's MAIN world cannot call `chrome.runtime.sendMessage`, so only
@@ -116,13 +116,19 @@ the bridge's listener runs inside that dispatch, judges, and dispatches the
 answer back before `dispatchEvent` returns. If the bridge never connected, the
 ask returns `no-bridge` and the open is refused (fail closed).
 
-Frame-gesture relay (cross-site embedded frame -> top frame):
+Press relay (who did the user press last: an embedded frame or the page?):
 
 ```mermaid
 flowchart LR
-    F["child bridge.js<br/>pointerdown, mousedown, touchstart"] -->|"runtime.sendMessage frameGesture<br/>(at most every 250 ms)"| BG["background.js<br/>only if sender.frameId is not 0<br/>max 4 per second"]
-    BG -->|"tabs.sendMessage to frameId 0"| TB["top bridge.js<br/>lastFrameGesture = now"]
+    F["child bridge.js<br/>pointerdown, mousedown, touchstart"] -->|"frameGesture<br/>(at most every 250 ms)"| BG["background.js<br/>frameGestureAt[tab] = now<br/>only if sender.frameId is not 0<br/>max 4 per second"]
+    F -->|"frameTopLink (click on a real _top / _parent link)"| BG
+    T["top bridge.js<br/>pointerdown, mousedown, touchstart"] -->|"topGesture"| BG
+    BG -->|"tabs.sendMessage frameGesture to frameId 0"| TB["top bridge.js<br/>lastFrameGesture = now"]
 ```
+
+The worker keeps the timestamps for the frame-takeover check; the relay back
+to the top frame feeds the bridge's own `embedded-frame` reason in the
+redirect guard.
 
 ## Verdict algorithm
 
@@ -342,9 +348,9 @@ follower when judging a landing.
 | Gesture capture listeners (12 types) | `bridge.js` | `window` of each frame | record `cur`, `lastAct`, `lastPressAt`, the geometry and press-time snapshots, `clickTask` / `enterTask`; swallow clicks on overlay links and decoy links in ad boxes (`overlay-link`) and clicks on links re-pointed since the press (`scripted-link` / `link-swapped`); mint `user-link` / `contextmenu` tokens |
 | `submit` capture listener | `bridge.js` | `window` of each frame | `_blank` submits not caused by the user's own click / Enter in the same task (`scripted-form`), or whose button was re-wired since the press (`scripted-form` / `form-swapped`); `requestSubmit()` and submit-button `click()` land here |
 | Navigation API `navigate` listener | `bridge.js` | top frame | cross-site redirects (`redirect`); suspicious same-site ones are handed to the worker to follow |
-| `blur` + `beforeunload` listeners | `bridge.js` | top frame | cross-site iframe `top.location` hijack (`redirect` / `embedded-frame`, "Leave site?"); `frameOverlay` for near-invisible frames |
+| `blur` listener | `bridge.js` | top frame | records a press that moved focus into an iframe; `frameOverlay` for near-invisible frames |
 | `webNavigation.onCreatedNavigationTarget` | `background.js` | worker | un-tokened new tabs (`new-tab` / `no-user-intent`), swapped link targets (`new-tab` / `link-swapped`) |
-| `webNavigation.onCommitted` | `background.js` | worker | followed tabs whose redirect hop lands on an unrelated site (`new-tab` or `redirect` / `redirect-chain`); also ends the tab-under memory when the user navigates the tab themselves |
+| `webNavigation.onCommitted` | `background.js` | worker | a cross-site embedded frame taking over the tab right after a press inside it (`redirect` / `embedded-frame`, tab sent back); followed tabs whose redirect hop lands on an unrelated site (`new-tab` or `redirect` / `redirect-chain`); also ends the tab-under memory when the user navigates the tab themselves |
 
 ### Link clicks and tokens (bridge `onGesture`)
 
@@ -470,17 +476,37 @@ user has interacted with the document, including redirects to sign-in and
 payment flows, except those made by an element-scoped handler while the click
 is still being dispatched.
 
-### Embedded-frame guard (top frame, `beforeunload`)
+### Frame-takeover check (worker, `onCommitted`)
 
 A cross-site iframe doing `top.location = ad` fires no `navigate` event in the
-top frame. On `beforeunload`, if mode is not `off`, `frameJustClicked()` holds,
-no top-frame event is being dispatched, and the page contains a cross-site
-`<iframe>` / `<frame>`, PopShield calls `preventDefault()` so Chrome asks
-"Leave site?", and logs `redirect` / `embedded-frame`.
+top frame, so the bridge can't cancel it. The worker undoes it instead.
+`checkFrameTakeover()` runs first for every top-frame commit in
+`webNavigation.onCommitted`, comparing the new address with the one the tab
+was on before (`lastTopUrl`):
 
-Timing comes from two sources: the top frame's `blur` when focus moves into an
-iframe, and the `frameGesture` relay for later clicks inside the same frame. On
-`blur`, if the focused iframe's effective opacity is < 0.5, whatever its size,
+```text
+no previous page in this tab                       -> leave it
+last frameGesture more than 6 s ago (FRAME_TAKEOVER_MS),
+  or a topGesture at or after it                   -> leave it
+user's own navigation (typed, auto_bookmark, generated, keyword,
+  keyword_generated, reload, forward_back, from_address_bar) -> leave it
+same site as before, or a sign-in/payment flow     -> leave it
+frameTopLink under 6 s old with the same origin + path -> leave it (a real link)
+the previous site's mode is off                    -> leave it
+otherwise -> chrome.tabs.goBack(tab), keep the tab's log, log redirect / embedded-frame
+```
+
+The frame timestamp is cleared once used, so one press can send the tab back
+only once. No prompt is shown at any point: closing the tab, typing an address
+or reloading is never interrupted. The cost is that the other site's page
+starts loading before the tab is sent back, and going back reloads the
+original page.
+
+The top bridge also keeps its own `lastFrameGesture` for the redirect guard's
+`embedded-frame` reason (a script move of the top page right after a press in a
+frame). Timing comes from two sources: the top frame's `blur` when focus moves
+into an iframe, and the `frameGesture` relay for later clicks inside the same
+frame. On `blur`, if the focused iframe's effective opacity is < 0.5, whatever its size,
 the top bridge sends `frameOverlay`, and the worker refuses tokens from child
 frames of that tab for 1.5 s: a frame you can barely see that receives a click
 is an overlay.
@@ -638,7 +664,7 @@ PopShield's own code makes no network requests, and the developer receives
 nothing from it. One path lets details leave the browser, and the user has to
 start it: the popup's Report buttons (`report()` in `src/popup.js`).
 
-1. A `confirm()` dialog lists what will be shared. Cancelling stops here.
+1. A confirmation panel inside the popup (not a browser dialog) lists what will be shared. Cancelling stops here.
 2. `chrome.tabs.create` opens
    `https://github.com/madironman/popshield/issues/new?...` with these query
    parameters: `template`, `title` (names the site), `url` (the tab's origin +
@@ -758,9 +784,9 @@ computed cursors, query strings, and everything `inject.js` says.
 - **Smart's delayed-redirect window.** A cross-site script redirect more than
   5 s after the last click, with no new tab involved, is allowed in Smart by
   design. Strict blocks it.
-- **Same-tab redirects have no backstop.** They rely on the Navigation API and
-  `beforeunload` guards in the bridge, plus the worker's chain follower for
-  same-site hops.
+- **Same-tab redirects have no backstop.** They rely on the Navigation API guard in the
+  bridge, the worker's frame-takeover check, and the worker's chain follower
+  for same-site hops.
 - Cross-origin frames that PopShield cannot patch from the parent are still
   covered by their own copy of the content scripts (`all_frames`,
   `match_origin_as_fallback`) and by the backstop.
@@ -792,8 +818,10 @@ computed cursors, query strings, and everything `inject.js` says.
   ≥ 40% of the viewport that opens windows needs a recognised framework (React,
   Solid, jQuery); otherwise it is treated as page-wide.
 - **Framework spoofing** aimed at PopShield (see the threat model).
-- **Embedded-frame hijacks** (`top.location = ad` from a cross-site frame) can't
-  be cancelled silently; Chrome shows "Leave site?". Click Cancel to stay.
+- **Embedded-frame hijacks are undone, not prevented.** `top.location = ad`
+  from a cross-site frame can't be cancelled; the worker sends the tab back
+  after the other page has started loading, and going back reloads the
+  original page.
 - **Same-site chain follow-up undoes, it doesn't prevent.** When a followed
   same-site hop lands on an ad, the ad page has already loaded before the tab
   is sent back.
@@ -828,7 +856,7 @@ computed cursors, query strings, and everything `inject.js` says.
 | Chain follower judges only real redirect hops | The user's own typed URL, bookmark or link click must never be undone as a "redirect" |
 | Incognito per-site choices in session storage | Writing them to `chrome.storage.local` would leave a record of sites visited in incognito |
 | Smart allows redirects > 5 s after a click; Strict doesn't | Checkout and bank hand-offs redirect after a wait; blocking them in the default mode would break payments, so the strict alternative is one click away |
-| `beforeunload` prompt for frame hijacks | No silent cancel is possible; a prompt is better than losing the page, and only within 6 s of a frame click with no top-page click since, while the page has focus |
+| Send the tab back after a frame takeover, no prompt | No silent cancel is possible. The earlier "leave this page" prompt also fired when the user closed a tab shortly after clicking in embedded content; undoing the commit in the worker never stands in the user's way, at the cost of a brief load and a reload of the original page |
 | Mode follows the top-level site | Users think in terms of the page they visit; an embedded frame inherits the page's setting |
 | Fail open in detectors, fail closed in the channel and the backstop | Breaking real sites is worse than missing one ad; a missing bridge or a missing token still blocks. `hasVisiblePaint`'s node cap is the exception, because "too big to check" was itself the attack |
 | Anonymous counter, per-tab log in session storage | Users get a counter while PopShield keeps no browsing history: the only site names it saves are the ones the user chooses a mode for |

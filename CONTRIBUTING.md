@@ -37,9 +37,9 @@ There is no build step. What is in `src/` is what Chrome runs.
 |---|---|
 | `manifest.json` | Extension manifest |
 | `src/inject.js` | Page-world (`MAIN`) hooks only: `window.open`, link clicks, `dispatchEvent`, `form.submit`, Picture-in-Picture, child-frame patching. It asks the bridge and supplies two hints; it decides nothing |
-| `src/bridge.js` | Isolated-world decision maker: judges every request, mints URL-bound tokens, runs the redirect, form and embedded-frame guards, writes the block log |
+| `src/bridge.js` | Isolated-world decision maker: judges every request, mints URL-bound tokens, runs the redirect and form guards, reports presses inside embedded frames (and real `target=_top` links clicked there) to the background, writes the block log |
 | `src/common.js` | Shared helpers: sites, modes (including incognito-only choices kept in memory), the exact list of sign-in/payment flows (`PROVIDER_FLOWS`) |
-| `src/background.js` | Service worker: validates bridge messages, backstop for new tabs, redirect-chain following, per-tab log, badge, anonymous counter |
+| `src/background.js` | Service worker: validates bridge messages, backstop for new tabs, redirect-chain following, sending a tab back when an embedded frame takes it over, per-tab log, badge, anonymous counter |
 | `src/popup.html`, `src/popup.js` | Toolbar popup: counter, blocked list, Open, Smart/Strict/Off, Report and Feedback |
 | `src/welcome.html` | First-install welcome page |
 | `test/` | Playwright tests, local fixture server and attack fixtures |
@@ -65,7 +65,7 @@ contacts a public website, and none should be added that does.
   PopShield and checks that every attack is blocked, every legitimate pattern
   still works, and the block log contains the expected kinds. Both passes run
   at the same time across parallel browsers (sized from your CPU and memory;
-  set `E2E_WORKERS=N` to override). The full suite is 120 scenarios and 223
+  set `E2E_WORKERS=N` to override). The full suite is 121 scenarios and 225
   counted checks, and takes about 50 seconds. `rt-*` cases are regressions
   from internal red-team rounds.
 - **Known bypasses.** A case with `knownBypass: true` is an attack the project
@@ -125,8 +125,10 @@ without PopShield and fails with it.
      `blocked: []` means "nothing may be logged" and is how legitimate cases
      catch false positives.
    - `played` / `iframePlayed`: the page's own button must keep working.
-   - `dialog: 'beforeunload'` / `noDialog: true`: a "Leave site?" prompt must /
-     must not appear. `downloaded`, `maxBlocked`: a download must happen; the
+   - `noDialog: true`: no browser dialog of any kind may appear (PopShield
+     never shows one; the frame-takeover cases use this to prove the tab is
+     sent back silently). `dialog: '<type>'` is the opposite check and is not
+     used by any case today. `downloaded`, `maxBlocked`: a download must happen; the
      log may hold at most this many entries.
    - `baseline`: what plain Chrome does without the extension, e.g.
      `{ tabs: 1 }` or `{ url: 'ad' }`. **This must show the attack succeeding**,
@@ -160,7 +162,8 @@ Please include:
 - **The URL** of the page (one that reproduces without logging in, if possible).
 - **The mode** shown in the PopShield popup for that site: Smart, Strict or Off.
 - **What opened**: a new tab, a popup window, a tab behind the current one, a
-  redirect of the current tab, or a "Leave site?" prompt; and what you clicked
+  redirect of the current tab, or the tab jumping to another site and back;
+  and what you clicked
   (a button, a link, anywhere on the page...).
 - **The PopShield popup log**: open the toolbar popup on that tab and attach a
   screenshot of the blocked list, even if it is empty.

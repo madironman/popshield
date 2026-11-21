@@ -73,8 +73,9 @@ JavaScript (MAIN) world. The full model is in
   non-clickable content with a pointer cursor to pass the check for listeners
   on non-clickable content. Plain ad links that the user really clicks are
   out of scope. Same-tab redirects have no token
-  backstop and rely on the bridge's Navigation API and `beforeunload` guards
-  plus the background's chain follower. In Smart mode, a script redirect more
+  backstop and rely on the bridge's Navigation API guard, the background's
+  send-back when an embedded frame takes over the tab (the other site may
+  start loading for a moment first), and the background's chain follower. In Smart mode, a script redirect more
   than about 5 s after the last click is allowed by design (payment
   hand-offs); Strict mode blocks it. Pages can detect that PopShield is
   installed (see below).
@@ -112,8 +113,8 @@ Out of scope (please use the normal issue forms instead):
 
 - An ad that still gets through on some site: use **Ad got through**.
 - A legitimate popup or link that gets blocked: use **False positive**.
-- The known limitations listed in the README (e.g. the "Leave site?" prompt for
-  cross-site embedded frames, opens scheduled with `setTimeout`, ad links styled
+- The known limitations listed in the README (e.g. a cross-site embedded frame
+  briefly loading another site in the tab before it is sent back, opens scheduled with `setTimeout`, ad links styled
   as site buttons, Smart mode's delayed-redirect window).
 - **Detection.** A page can tell that PopShield is installed (its hooks and
   refused popups are observable), which makes it one more fingerprinting

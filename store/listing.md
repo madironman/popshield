@@ -98,7 +98,7 @@ KNOWN LIMITATIONS
 - In Smart mode, an ad script that waits more than a few seconds after your click before redirecting the page can get through; this keeps payment pages working. Use Strict on sites you don't trust.
 - A site that opens another site from a listener on plain text or an image (nothing that looks clickable) is blocked in Smart mode. Use Open in the popup.
 - Sign-in and payment services are recognised from a fixed list of exact addresses; others are treated like any other site.
-- If a frame embedded from another site tries to take over the whole tab, Chrome may show a "Leave site?" prompt. Click Cancel to stay on the page.
+- If a frame embedded from another site takes over the whole tab right after you click inside it, PopShield sends the tab back to the page you were on. The other page may appear for a moment first, and the original page loads again.
 - Like any extension that changes page behaviour, PopShield can be detected by the pages you visit.
 - PopShield is built and tested for Chrome. Other Chromium-based browsers are not tested.
 
@@ -160,7 +160,7 @@ Saves the user's mode choices (Smart, Strict or Off, as a default and for sites 
 **webNavigation**
 
 ```
-PopShield uses webNavigation.onCreatedNavigationTarget to detect when a page opens a new tab or window, so it can close, within a fraction of a second, tabs the page opened without the user's click (the main defence against popunders that bypass the in-page checks). It uses webNavigation.onCommitted to reset the per-tab blocked list when the tab loads a new page, and, for up to 8 seconds after a doubtful approval, to check whether a tab was redirected on to an unrelated site, so it can close that tab or send it back; navigations the user makes (typed addresses, bookmarks, links, back/forward, reload) are never treated as redirects. No navigation data is stored beyond that per-tab list, which lives only in memory for that tab; the short-lived checks are kept in memory only and never saved. None of it is sent to the developer.
+PopShield uses webNavigation.onCreatedNavigationTarget to detect when a page opens a new tab or window, so it can close, within a fraction of a second, tabs the page opened without the user's click (the main defence against popunders that bypass the in-page checks). It uses webNavigation.onCommitted to reset the per-tab blocked list when the tab loads a new page; to notice when a frame embedded from another site sends the whole tab to a different site within a few seconds of the user clicking inside that frame, so it can send the tab back; and, for up to 8 seconds after a doubtful approval, to check whether a tab was redirected on to an unrelated site, so it can close that tab or send it back; navigations the user makes (typed addresses, bookmarks, links, back/forward, reload) are never treated as redirects. No navigation data is stored beyond that per-tab list, which lives only in memory for that tab; the short-lived checks are kept in memory only and never saved. None of it is sent to the developer.
 ```
 
 **Host permission: `<all_urls>`** (used by the content scripts and to read the tab's site in the popup)

@@ -551,44 +551,70 @@ Chapter 5 shows how the worker follows a tab.
 
 When a frame embedded from another site (a widget, for example) does
 `top.location = AD`, Chrome sends
-**no** `navigate` event to the top page, so the guard above never sees it. The
-top page does still get `beforeunload`, the event behind the "Leave site?"
-question. PopShield asks Chrome to show that question when all of these hold:
-your most recent click was inside a frame, less than 6 seconds ago; you
-haven't clicked on the main page since; the page still has the keyboard
-focus; and the page contains a frame from another site. Click **Cancel** and
-you stay.
+**no** `navigate` event to the top page, so the guard above never sees it, and
+there's no other way for the page to stop it in time. So PopShield doesn't try
+to stop it. It lets the move happen and then **undoes** it, from the service
+worker, which sees every page a tab lands on.
 
-The focus check is what keeps the question away when *you* leave: reloading
-or typing an address moves focus to Chrome's toolbar. To know when you clicked
-inside the frame, the top page notices focus moving into a frame, and that
-frame's own `bridge.js` reports later clicks through the service worker
-(frames from different sites can't talk to each other directly).
+To do that, the worker needs to know one thing: did you just press inside an
+embedded frame, or on the page itself? Every copy of `bridge.js` tells it.
+The one in the top page sends `topGesture` when you press; the one inside an
+embedded frame sends `frameGesture`. (Frames from different sites can't talk
+to each other directly, but each can talk to the worker.) The worker just
+writes down the time of each.
+
+When the tab then lands on a new page, the worker asks:
+
+1. Did you press inside a frame less than 6 seconds ago, with no press on the
+   page itself since then?
+2. Is the new page on a **different site** from the one you were on?
+3. Was this move *not* your own doing? Typing an address, picking a bookmark,
+   reloading, and the Back and Forward buttons are always yours, and Chrome
+   tells the worker which of these happened.
+4. Is the new page *not* the start of a sign-in or payment flow, and is
+   PopShield not set to Off for the site you were on?
+
+If every answer is yes, the worker presses Back for you
+(`chrome.tabs.goBack`) and logs `redirect` / `embedded-frame`. No question
+pops up, so closing the tab or typing an address right after clicking inside
+a frame is never interrupted.
 
 ```mermaid
 sequenceDiagram
     actor U as You
     participant CB as embedded frame (bridge.js)
     participant SW as background.js
-    participant TB as top page (bridge.js)
+    participant T as the tab
     participant AD as ad script in the frame
 
     U->>CB: press inside the frame
     CB->>SW: frameGesture
-    SW->>TB: frameGesture, to the top frame only
-    Note over TB: remember: frame clicked just now
-    AD->>TB: top.location = AD (no navigate event)
-    Note over TB: beforeunload, frame clicked under 6 s ago, page focused
-    TB-->>U: Chrome asks "Leave site?"
+    Note over SW: remember: frame pressed just now
+    AD->>T: top.location = AD (no navigate event)
+    T->>SW: the tab landed on AD (another site)
+    Note over SW: frame pressed under 6 s ago, not your navigation
+    SW->>T: go back
+    Note over T: the original page loads again
 ```
+
+Sometimes a frame really does have a link meant to open in the whole tab: a
+link with `target="_top"` (or `_parent`). When you click one, the frame's
+`bridge.js` also sends `frameTopLink` with the link's address. If the tab
+then lands on that same page (same origin and path), the worker leaves it
+alone, because you asked for it (`legit-frame-top-link`).
+
+There's a price for undoing instead of preventing: the other page may start
+loading for a moment before the tab goes back, and going back loads the
+original page again, so anything you hadn't saved on it can be lost.
 
 If the frame you clicked into is hard to see (an effective opacity below 0.5,
 whatever its size), the click was really meant for what's underneath: a frame
 you can barely see that receives a click is an overlay. The top bridge then
 tells the worker to refuse tickets from child frames of that tab for 1.5
 seconds. (`player-iframe-top-redirect`, `player-iframe-top-redirect-2nd`,
-`rt-frame-redirect-after-4s` prompted; `rt-small-invisible-xframe` blocked;
-`legit-player-then-reload`, `legit-player-then-type-url` not prompted)
+`rt-frame-redirect-after-4s` sent back; `rt-small-invisible-xframe` blocked;
+`legit-player-then-reload`, `legit-player-then-type-url` and
+`legit-frame-top-link` left alone)
 
 ### Frameworks that delegate clicks
 
@@ -990,8 +1016,10 @@ page that changes its address without loading a new page.
 
 The service worker also keeps a little **working memory** while it does its
 job: the tickets (with the address each is for), the tails from chapter 5
-(with the site names they allow), the moment each tab last opened a tab, and
-which new tabs were opened on thin evidence.
+(with the site names they allow), the moment each tab last opened a tab,
+which new tabs were opened on thin evidence, and, for the frame check in
+chapter 3, when you last pressed inside a frame or on the page, the last
+whole-tab link you clicked inside a frame, and the address each tab is on.
 None of it is ever written to storage. Tickets expire within seconds, tails
 after 8 seconds, and all of it is dropped when the tab closes or the worker
 is stopped.
@@ -1138,10 +1166,11 @@ and a **Feedback** link.
 - **Unknown frameworks.** A container covering 40% or more of the page that
   runs every button's code is treated as page-wide unless it belongs to React,
   Solid or jQuery.
-- **Embedded-frame hijacks** still show "Leave site?" instead of being
-  cancelled silently.
+- **Embedded-frame hijacks are undone, not prevented.** The other page may
+  start loading for a moment before the worker sends the tab back, and the
+  original page loads again.
 - **Same-tab redirects have no safety net of tickets**: they rely on the
-  bridge's guards. When a same-site hop bounces on to an ad, the worker sends
+  bridge's guards and the worker sending the tab back. When a same-site hop bounces on to an ad, the worker sends
   the tab back, but the ad page has already loaded once.
 
 ### Check your understanding

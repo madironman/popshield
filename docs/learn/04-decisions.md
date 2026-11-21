@@ -47,6 +47,7 @@ flowchart TD
     subgraph H["The final review rounds"]
         D25["25. Remember what you pressed"] --> D26["26. Listeners on everything"]
         D26 --> D27["27. An exact list of sign-in pages"] --> D28["28. Keeping a click cheap"]
+        D28 --> D29["29. Undo instead of asking"]
     end
     A --> B --> C --> D --> E --> F --> G --> H
 ```
@@ -79,6 +80,7 @@ flowchart TD
 - [26. Listeners on everything](#26-listeners-on-everything)
 - [27. An exact list of sign-in and payment pages](#27-an-exact-list-of-sign-in-and-payment-pages)
 - [28. Keeping a click cheap](#28-keeping-a-click-cheap)
+- [29. Undoing a frame takeover instead of asking](#29-undoing-a-frame-takeover-instead-of-asking)
 
 ---
 
@@ -579,8 +581,7 @@ document.addEventListener('click', () => {   // on any click...
 ```
 
 `location.href` can't be replaced by scripts, so there's nothing to hook. The
-`beforeunload` event can only make Chrome ask "Leave site?", not cancel
-quietly. The tool that fits is the Navigation API: its `navigate` event
+tool that fits is the Navigation API: its `navigate` event
 announces a navigation of the top frame before it happens, and can cancel it.
 The guard lives in the bridge, not the page's world, because the readers on
 navigation events were one of the swappable tools in decision 7.
@@ -639,31 +640,39 @@ Chrome sends **no** `navigate` event to the top page when a frame from another
 origin starts the navigation, so decision 11's guard never hears about it.
 Assigning to `location` can't be hooked. Doing nothing means losing the page.
 
-What the top page does still get is `beforeunload`, and cancelling that makes
-Chrome ask "Leave site?". A prompt is worse than a silent block, but much
-better than losing the page. The hard part was asking only when the ad is
-responsible, and never when you're leaving on purpose:
+What PopShield can still do is notice afterwards. The service worker hears
+every time the tab lands on a new page (`webNavigation.onCommitted`), and it
+can press Back for the tab (`chrome.tabs.goBack`). So the worker undoes the
+hijack, and the hard part is undoing it only when the ad is responsible,
+never when you're leaving on purpose:
 
-- **Within 6 seconds** of a click inside a frame, with no click on the main
-  page since. Long enough for a slow ad script, short enough not to linger.
+- **Within 6 seconds** of a press inside a frame, with no press on the page
+  itself since. Long enough for a slow ad script, short enough not to linger.
   (It was 4 seconds until a red-team frame simply waited 4.5.)
-- **Only while the page has focus.** When you reload or type an address, the
-  focus moves to Chrome's toolbar, so `document.hasFocus()` is false. An ad
-  redirecting from inside the frame leaves the focus on the page.
-- **Only if the page contains a frame from another site.**
+- **Only to a different site**, and never to the start of a sign-in or
+  payment flow (decision 27), or on a site you set to Off.
+- **Never your own navigation.** Chrome tells the worker how each page was
+  reached: typed into the address bar, picked from bookmarks, reloaded, Back
+  or Forward. Those are always left alone.
+- **Never a real link you clicked in the frame.** A link with
+  `target="_top"` is a frame's honest way to open something in the whole tab.
+  When you click one, the frame's bridge reports its address, and a landing on
+  that same page (origin and path) is left alone.
 
-How does the top page know you clicked inside the frame? Your first click
-moves focus into the frame, which the top page sees as a `blur`. Later clicks
-don't move focus, so the frame's own `bridge.js` reports them. Frames from
-different sites can't talk to each other directly, and the page's own
-messaging (`postMessage`) could be forged by any script, so the report goes
-through the service worker, which forwards it only from a child frame to the
-top frame of the same tab, at most four times a second:
+How does the worker know you pressed inside the frame? Each frame's own
+`bridge.js` tells it: `frameGesture` from an embedded frame, `topGesture`
+from the page itself. Frames from different sites can't talk to each other
+directly, and the page's own messaging (`postMessage`) could be forged by any
+script, so the reports go to the service worker, which accepts each kind only
+from the right sort of frame, at most four times a second. It also passes the
+frame report on to the top page, whose redirect guard (decision 11) uses it
+too:
 
 ```mermaid
 flowchart LR
-    C["embedded frame bridge.js<br/>you pressed here"] -->|"frameGesture"| W["background.js<br/>only from child frames"]
-    W -->|"to the top frame"| T["top bridge.js<br/>frame clicked just now"]
+    C["embedded frame bridge.js<br/>you pressed here"] -->|"frameGesture"| W["background.js<br/>remembers the time"]
+    T["top bridge.js<br/>you pressed here"] -->|"topGesture"| W
+    W -->|"tab lands on another site<br/>within 6 s"| B["go back"]
 ```
 
 One more frame trick: a frame from another site made fully transparent and
@@ -673,12 +682,14 @@ effective opacity below 0.5 that receives your click is treated as an
 overlay, whatever its size: for 1.5 seconds the worker refuses tickets from
 the tab's child frames.
 
-The cost: you see a question and must click **Cancel**.
+The cost: the ad's page may start loading for a moment before the tab is sent
+back, and going back loads the original page again. Decision 29 explains why
+this replaced an earlier design that asked you a question instead.
 
 Proof: `player-iframe-top-redirect`, `player-iframe-top-redirect-2nd`,
-`rt-frame-redirect-after-4s` (prompt); `rt-small-invisible-xframe`,
+`rt-frame-redirect-after-4s` (sent back, no dialog); `rt-small-invisible-xframe`,
 `rt-transparent-xframe` (blocked); `legit-player-then-reload`, `legit-player-then-type-url`,
-`legit-leave-after-player` (no prompt).
+`legit-leave-after-player`, `legit-frame-top-link` (left alone).
 
 ## 13. Surviving `document.open()`
 
@@ -814,7 +825,7 @@ nothing in it depends on, or measures, anyone else's site.
 
 Real browsers are slow, so the suite runs many of them in parallel
 (`E2E_WORKERS`, sized from the machine's processors and memory), splitting the
-work between the baseline and PopShield runs. All 223 checks finish in about
+work between the baseline and PopShield runs. All 225 checks finish in about
 50 seconds.
 
 The cost: browser tests take longer than plain code tests, and the fixture
@@ -1302,6 +1313,36 @@ been done.
 The cost: the "which elements can host a shadow root" list must follow the
 web standard if it ever grows.
 
+## 29. Undoing a frame takeover instead of asking
+
+The first answer to decision 12 lived in the top page. Just before a page is
+left, it gets an event called `beforeunload`, and a page that cancels it makes
+Chrome ask "Leave site?". PopShield used that: within 6 seconds of a press
+inside a frame, it made Chrome ask, and you clicked **Cancel** to stay.
+
+In use, that question turned up at the wrong moments. Click inside some
+embedded content, then close the tab or type a new address a few seconds
+later, and the question appeared anyway: `beforeunload` can't tell *who* is
+leaving the page, only that it is being left. Checks on keyboard focus helped
+with typed addresses but not with closing a tab. A guard that interrupts you
+when you're doing exactly what you meant to do is a bad guard.
+
+So the decision moved to the service worker, which *can* tell who is
+leaving. Chrome labels each landing with how it happened (typed, bookmark,
+reload, Back or Forward), and closing a tab isn't a landing at all. The worker
+lets the hijack happen and then sends the tab back, and PopShield never shows
+a "leave this page" question for anything.
+
+What was traded away: the ad's page may load for a moment, and going back
+loads the original page again, so anything unsaved on it can be lost. With
+the old question, the page stayed exactly as it was, if you clicked Cancel.
+A new risk also needed a rule: a frame's honest `target="_top"` link would
+now be sent back too, which is why a real link click inside a frame is
+reported and let through (`legit-frame-top-link`).
+
+The tests changed with it. The frame-hijack cases now check that **no**
+dialog appears and that the tab ends up on the original page.
+
 ### Check your understanding
 
 1. Why did the decision move to the isolated world, when saving clean tools in
@@ -1325,8 +1366,8 @@ web standard if it ever grows.
    something only you can provide. The page forgets everything when the tab
    moves to another page, so the worker keeps the memory per tab.
 3. Frames from different sites can't talk directly, and page messaging could
-   be forged; the worker only forwards reports from child frames to the top
-   frame of the same tab.
+   be forged; the worker accepts frame reports only from child frames, keeps
+   the times itself, and is the one that sees where the tab lands.
 4. Framework data planted on the element you click before you press it: the
    bridge is fooled into approving, so a ticket exists. The worker follows the
    weak ticket's tab, which catches a redirect chain, but not an open straight

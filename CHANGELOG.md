@@ -117,12 +117,12 @@ First public release.
   cannot be sent to another site. A tab opened on weak evidence learns so
   from the background on its first page, so the guard applies even when it
   was opened with `noopener`.
-- **Embedded-frame hijack guard.** When a cross-site embedded frame tries to
-  navigate the whole tab (`top.location = ad`) within 6 s of a click inside a
-  frame, with no click on the main page since and while the page has focus
-  (`document.hasFocus()`), PopShield holds the page so Chrome asks "Leave
-  site?". The frame relays its pointer-down to the top page through the
-  background worker. A frame with an effective opacity below 0.5 that receives
+- **Frame-takeover check.** When content embedded from another site sends the
+  whole tab to a different site (`top.location = ad`) within 6 s of a click
+  inside it, with no click on the main page since, the background worker sends
+  the tab back and logs it. Closing a tab, typing an address, reloading and
+  back/forward are never touched, and a real `target=_top` link clicked inside
+  the frame is allowed. PopShield never shows a "leave page" prompt. A frame with an effective opacity below 0.5 that receives
   a click is treated as an overlay, whatever its size, and tokens from child
   frames are refused right after it. Reloads and typed URLs are never
   interrupted.
@@ -193,7 +193,7 @@ First public release.
   the user signs in and submits. The buttons are hidden in incognito windows.
   "Feedback" opens GitHub Discussions (Ideas).
 - **Welcome page** on first install.
-- **Tests.** End-to-end suite (`test/run.mjs`, 120 scenarios, 223 counted
+- **Tests.** End-to-end suite (`test/run.mjs`, 121 scenarios, 225 counted
   checks, about 50 s) that runs every scenario in real Chromium without the
   extension (proving each attack works) and with PopShield, in parallel
   browsers. It includes 58 regression scenarios from three internal red-team
