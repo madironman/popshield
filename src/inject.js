@@ -299,6 +299,13 @@
     const now = R_apply(dateNow, Date, []);
     if (type === 'pointerdown') lastPointerDown = now;
     else if ((type === 'mousedown' || type === 'touchstart') && now - lastPointerDown < 1000) return;
+    else if (type === 'keydown') {
+      // Only Enter/Space activate anything: other keys (typing) just drop the
+      // old snapshot instead of walking the path with Object.keys per keystroke.
+      let k = '';
+      try { k = R_apply(keyGet, e, []); } catch {}
+      if (k !== 'Enter' && k !== ' ') { propsAtPress = new WSet(); return; }
+    }
     let path;
     try { path = R_apply(origComposedPath, e, []); } catch { return; }
     propsAtPress = new WSet();

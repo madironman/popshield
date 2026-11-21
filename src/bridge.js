@@ -126,12 +126,20 @@
   function viewOf(el) { try { return el.ownerDocument.defaultView || window; } catch { return window; } }
   // The element actually under the pointer, even inside a closed shadow root
   // (whose host may have no box of its own, e.g. display: contents).
+  // Only these HTML elements and custom elements can host a shadow root
+  // (attachShadow / declarative shadow DOM); skip the extension API call
+  // (~5 us, several times per click) for links, buttons, images, inputs...
+  const SHADOW_HOSTS = new Set(['article', 'aside', 'blockquote', 'body', 'div', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'header', 'main', 'nav', 'p', 'section', 'span']);
+  function mayHostShadow(t) {
+    return t.namespaceURI === 'http://www.w3.org/1999/xhtml' && (SHADOW_HOSTS.has(t.localName) || t.localName.includes('-'));
+  }
   function targetOf(e) {
     let t = null;
     try { const p = e.composedPath(); if (p && p.length) t = p[0]; } catch {}
     if (!t) t = e.target;
     try {
-      for (let i = 0; i < 4 && t && t.nodeType === 1 && typeof e.clientX === 'number'; i++) {
+      for (let i = 0; i < 4 && t && t.nodeType === 1 && typeof e.clientX === 'number' && mayHostShadow(t); i++) {
         const sr = chrome.dom && chrome.dom.openOrClosedShadowRoot(t);
         if (!sr) break;
         const inner = sr.elementFromPoint(e.clientX, e.clientY);
@@ -149,7 +157,7 @@
     return (w * h) / (vw * vh);
   }
   function alphaOf(color) {
-    if (!color || color === 'transparent') return 0;
+    if (!color || color === 'transparent' || color === 'rgba(0, 0, 0, 0)') return 0; // common computed value: skip the regex
     const m = /rgba?\(([^)]+)\)/.exec(color);
     if (!m) return 1;
     const parts = m[1].split(/[\s,/]+/).filter(Boolean);
@@ -177,6 +185,7 @@
     const colors = bi.match(/rgba?\([^)]*\)/gi);
     return !colors || colors.some((c) => alphaOf(c) >= 0.1);
   }
+  const MEDIA_TAGS = new Set(['img', 'video', 'canvas', 'svg', 'picture', 'object', 'embed', 'iframe']);
   // Does this element (or anything inside it) paint something the user can see?
   function hasVisiblePaint(el) {
     const view = viewOf(el);
@@ -198,7 +207,7 @@
         if (alphaOf(cs.backgroundColor) >= 0.1 || bgImageVisible(cs.backgroundImage)) {
           if (effectiveOpacity(n) >= 0.2) return true;
         }
-        if (/^(img|video|canvas|svg|picture|object|embed|iframe)$/.test(n.localName)) {
+        if (MEDIA_TAGS.has(n.localName)) {
           const r = n.getBoundingClientRect();
           if ((r.width * r.height) / boxArea >= 0.1 && effectiveOpacity(n) >= 0.2) return true;
         }
@@ -467,7 +476,10 @@
       // (swap a link's address, attach a button to an ad form). The compat
       // mousedown after a pointerdown is the same press.
       // (mousedown / touchstart right after a pointerdown are the same press.)
-      if (!((type === 'mousedown' || type === 'touchstart') && press && press.type0 === 'pointerdown' && performance.now() - press.t < 1000)) press = pressSnapshot(e, type);
+      // Typing: only Enter/Space activate, so other keys just drop the old
+      // snapshot instead of walking the focused element's path per keystroke.
+      if (type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') press = null;
+      else if (!((type === 'mousedown' || type === 'touchstart') && press && press.type0 === 'pointerdown' && performance.now() - press.t < 1000)) press = pressSnapshot(e, type);
     }
     const keyOk = (type !== 'keydown' && type !== 'keyup') || e.key === 'Enter' || e.key === ' ';
     if (ACTIVATING.has(type) && keyOk) {
