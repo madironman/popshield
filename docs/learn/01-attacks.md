@@ -76,6 +76,16 @@ window.addEventListener('mousedown', () => window.open(AD), true);  // on every 
 And another hides the listener on a `<div>` that wraps the whole page, instead
 of on `document` itself, hoping nobody checks there (`wrapper-div-popunder`).
 
+The most spread-out version doesn't use one big listener at all. It puts a
+small listener on **every** element of the page, every paragraph, picture
+and empty box, so wherever you click, one of them hears it:
+
+```js
+for (const el of document.querySelectorAll('*')) {   // every element on the page...
+  el.addEventListener('click', () => window.open(AD)); // ...gets its own little ad listener
+}
+```
+
 ### The invisible overlay
 
 A see-through element covers the whole page. You think you are clicking Play;
@@ -186,6 +196,12 @@ document.addEventListener('click', (e) => {     // on any click anywhere...
 The new address is on the same site as the page, which makes it look
 harmless. It's a *redirector*, described below.
 
+A variant does the swap even earlier, in the moment between pressing the
+mouse button and releasing it. Your finger is already down on the link, so
+your mind is made up; the script changes where the link goes, or, for a
+button, quietly attaches it to a different, hidden form that opens the ad.
+When you let go, the browser obeys your genuine click and goes to the ad.
+
 ### Check your understanding
 
 1. Why does the ad's `document` listener fire when you click the Play button?
@@ -274,6 +290,13 @@ Before you touch it, a script sends the popup somewhere else.
 ```text
  [ your page ] ──► [ popup: sign-in ] ──(script)──► [ popup: AD ]
 ```
+
+Sign-in pages are an attractive disguise in general. A blocker has to let
+pages move you to a sign-in or payment page without a fresh click (logging
+in and paying often work that way), so an ad that can make its address
+*look* like one gets a free pass. Tricks include adding `?client_id=...` to
+any address, or renting a sub-address on a sign-in service that gives one to
+every customer.
 
 ### The hijack from inside the video player
 

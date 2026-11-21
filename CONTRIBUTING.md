@@ -38,11 +38,12 @@ There is no build step. What is in `src/` is what Chrome runs.
 | `manifest.json` | Extension manifest |
 | `src/inject.js` | Page-world (`MAIN`) hooks only: `window.open`, link clicks, `dispatchEvent`, `form.submit`, Picture-in-Picture, child-frame patching. It asks the bridge and supplies two hints; it decides nothing |
 | `src/bridge.js` | Isolated-world decision maker: judges every request, mints URL-bound tokens, runs the redirect, form and embedded-frame guards, writes the block log |
-| `src/common.js` | Shared helpers: sites, modes, the sign-in/payment provider list |
+| `src/common.js` | Shared helpers: sites, modes (including incognito-only choices kept in memory), the exact list of sign-in/payment flows (`PROVIDER_FLOWS`) |
 | `src/background.js` | Service worker: validates bridge messages, backstop for new tabs, redirect-chain following, per-tab log, badge, anonymous counter |
 | `src/popup.html`, `src/popup.js` | Toolbar popup: counter, blocked list, Open, Smart/Strict/Off, Report and Feedback |
 | `src/welcome.html` | First-install welcome page |
 | `test/` | Playwright tests, local fixture server and attack fixtures |
+| `scripts/` | `package.mjs` builds the release zip (and refuses symlinks and stray files such as `*.orig`, `*.rej`, `*.bak` or dotfiles); `check-version.mjs` checks that versions agree |
 
 ## Tests
 
@@ -180,6 +181,15 @@ Don't paste URLs containing session tokens or personal data.
   features.
 - Keep pages working: when in doubt, prefer letting a legitimate action through
   (and covering the ad with a narrower rule) over a broad block.
+- Sign-in and payment exemptions are exact: add a provider to `PROVIDER_FLOWS`
+  in `src/common.js` as an exact host plus the path prefix where its flow
+  starts. Never exempt a whole domain, a domain where anyone can get a
+  subdomain, or URLs by their query string.
+- Mode choices made in incognito must stay in `chrome.storage.session`; never
+  write them to `chrome.storage.local`.
+- PopShield runs on every click and keystroke: keep per-event work small (a
+  click currently costs about 0.1 ms, with no forced layouts), and don't do
+  per-keystroke work for keys other than Enter and Space.
 - Style: 2-space indentation, single quotes, semicolons, small functions with a
   comment explaining *why* for any non-obvious rule. `.editorconfig` covers the
   basics.

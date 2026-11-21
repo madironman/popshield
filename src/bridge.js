@@ -474,8 +474,7 @@
       lastPressAt = performance.now();
       // Snapshot what is being pressed, before page handlers can re-wire it
       // (swap a link's address, attach a button to an ad form). The compat
-      // mousedown after a pointerdown is the same press.
-      // (mousedown / touchstart right after a pointerdown are the same press.)
+      // mousedown / touchstart right after a pointerdown are the same press.
       // Typing: only Enter/Space activate, so other keys just drop the old
       // snapshot instead of walking the focused element's path per keystroke.
       if (type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') press = null;

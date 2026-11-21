@@ -138,9 +138,10 @@ in [Part II](02-extensions.md#2-popshields-manifest-line-by-line)).
 **[`src/common.js`](../../src/common.js)** is small and shared by the bridge,
 the worker and the popup. `siteOf()` turns a host name into a site (keeping
 three labels for endings like `co.uk`). `getMode()` returns the mode for a
-site: a per-site choice if you made one, otherwise your default. `PROVIDERS`
-is the sign-in and payment list, and `looksLikeAuthOrPay()` decides whether
-an address on one of them is a sign-in or payment page.
+site: a per-site choice if you made one (in incognito, a choice made there
+first, kept in session memory), otherwise your default. `PROVIDER_FLOWS` is
+the sign-in and payment list (exact hosts with path prefixes), and
+`isProviderFlow()` decides whether an address is on it.
 
 **[`src/inject.js`](../../src/inject.js)** (page's world). From the top:
 
@@ -170,21 +171,27 @@ PopShield. From the top:
    `isOverlay`, `isAdLayer`, `isPageWide`, `inAdBoxFrame`, `isDeadHref`,
    `clickedLink`, `providerFlow`;
 5. the gesture state, the snapshot and the verdict: `snapshotFor()`,
-   `gestureVerdict()`, `asyncAllowed()`, `judge()`, `handleAsk()`;
-6. `onGesture()`: records clicks and presses, takes the snapshot, cancels
-   overlay links, issues link tickets;
-7. `onSubmit()`: the form guard (same-task rule);
+   `gestureVerdict()`, `asyncAllowed()`, `judge()` (with `clickablePath()`
+   for the listeners-on-everything rule), `handleAsk()`;
+6. `onGesture()`: records clicks and presses, takes the snapshot and the
+   press-time snapshot (`pressSnapshot()`), cancels overlay links and links
+   re-pointed since the press, issues link tickets;
+7. `onSubmit()`: the form guard (same-task rule, and no button re-wired since
+   the press);
 8. top frame only: `frameJustClicked()`, the `tabState` question to the worker,
-   the `navigate` listener with `redirectReason()` (redirect guard) and
+   the `navigate` listener with `redirectReason()` (redirect guard; the
+   sign-in/payment exemption comes after the tab-under, popup-hijack and
+   Strict checks) and
    `onBeforeUnload()` (player hijack).
 
 **[`src/background.js`](../../src/background.js)** (service worker):
 constants (ticket lifetimes, limits), the whitelists of kinds and reasons,
 rate limits, tickets (`addToken`, `tokenFits`, `takeToken`,
 `takeSwappedLink`), the redirect-chain follower's state (`tabWatch`,
-`navWatch`, `landingOk`) and the per-tab "opened a tab at" memory
-(`newTabAt`), the per-tab list (`logBlocked`, `flushLog`, `clearTab`), the
-anonymous counter (`bumpStatsMany`), the message handler, the backstop
+`navWatch`, `landingOk`, `isRedirectHop`), the per-tab "opened a tab at"
+memory (`newTabAt`) and the "opened on weak evidence" set (`weakTabs`), the per-tab list (`logBlocked`, `flushLog`, `clearTab`), the
+anonymous counter (`bumpStatsMany`), the message handler (including
+`getMode` for incognito pages), the backstop
 (`onCreatedNavigationTarget`), the chain follower and cleanup
 (`onCommitted`), cleanup when a tab closes, and the welcome page on install.
 

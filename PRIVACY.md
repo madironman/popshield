@@ -35,6 +35,11 @@ device, and none of them is a record of the sites you visit.
    site's domain name (for example `example.com` → `strict`). A site appears
    here only if you set a mode for it; picking the default mode again removes
    it. These stay until you change them or remove the extension.
+
+   A mode you choose for a site **in an incognito window** is handled
+   differently: it is kept only in memory (`chrome.storage.session`), applies
+   only to incognito tabs, and is forgotten when the browser exits. It is
+   never written to disk, so it can't reveal a site you visited privately.
 2. **An anonymous block counter** (`chrome.storage.local`): the total number of
    blocks, the number per day (the last 30 days are kept), the number per kind
    of block (for example "popup" or "redirect"), and the date counting started.
@@ -58,17 +63,30 @@ While it works, PopShield's background worker keeps a few things in its
 memory only, and never writes them to storage:
 
 - for a few seconds after you click a link or a page is allowed to open a
-  tab, the address that new tab is allowed to open (up to 15 seconds for
+  tab, the address that new tab is allowed to open (up to 8 seconds for
   right-click "Open link in new tab"), so a tab you didn't ask for can be
   told apart from one you did;
 - for up to 8 seconds after a doubtful approval, the site names a tab is
   allowed to land on, so a redirect that bounces on to an unrelated site can
   be undone;
 - for each tab, the time it last opened another tab, so a page can't turn
-  the tab you left behind into an ad.
+  the tab you left behind into an ad (forgotten when you navigate that tab
+  yourself);
+- for a new tab opened on doubtful evidence, a flag saying so, until that
+  tab's first page has loaded.
 
 This is not a record of your browsing: it is never saved, never sent, and it
 is dropped when the tab closes or the worker stops.
+
+## Pages can tell that PopShield is installed
+
+PopShield changes how pages behave: popups get refused, and functions such as
+`window.open` are replaced by PopShield's own versions. A web page that looks
+for these effects can tell that PopShield (or something like it) is
+installed. Like any detectable extension, that is one more detail a site
+could combine with others to recognise a browser ("fingerprinting").
+PopShield does not try to hide itself, and it never tells pages anything
+about you, your settings or the sites you visit.
 
 ## Reporting a problem (only when you choose to)
 
@@ -98,7 +116,9 @@ before the page's own scripts do. Its content scripts watch for attempts to
 open new tabs or redirect the current tab and decide, inside your browser,
 whether you actually asked for it. The `webNavigation` permission lets it close
 tabs that a page opened without your action, and check, for a few seconds,
-where a doubtfully approved tab actually lands. This processing happens locally
+whether a doubtfully approved tab is redirected somewhere else. Navigations
+you make yourself (typing an address, a bookmark, a link, back, forward,
+reload) are never second-guessed. This processing happens locally
 and nothing about the pages you visit is recorded beyond the per-tab blocked
 list described above, which disappears with the tab.
 

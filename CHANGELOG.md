@@ -24,7 +24,11 @@ First public release.
   synchronously asks the isolated-world `bridge.js` for a verdict over a
   private channel. The channel's 128-bit nonce is exchanged once at
   `document_start`, before any page script runs, and never re-broadcast. Every
-  built-in `inject.js` uses is captured up front. It supplies only two hints:
+  built-in `inject.js` uses is captured up front (including regular-expression
+  matching through a saved `exec`, `querySelectorAll`, the `document.body` /
+  `documentElement` getters, `Object.getPrototypeOf`, `Promise.reject` and
+  `DOMException`), and its loops use indexes rather than the page's array
+  iterator. It supplies only two hints:
   framework attribution and async origin (ignored if `Error.prepareStackTrace`
   is set). `bridge.js` judges with clean APIs, mints every allow token (each
   bound to a URL), runs the redirect, embedded-frame and native form-submit
@@ -36,10 +40,16 @@ First public release.
   request. A page that subverts `inject.js` can at
   most skip the early block: the backstop still closes any tab the bridge
   didn't approve.
+- **Press-time snapshot.** At each press (pointer, touch, or Enter / Space),
+  the bridge records the pressed link and its address, and the pressed button
+  with its form, type, `formtarget` and `formaction`. If a script re-points
+  that link to another site, or re-wires that button, before the click, the
+  click or submit is refused (`link-swapped`, `form-swapped`). Other
+  keystrokes take no snapshot, so typing costs nothing extra.
 - **Strict background worker.** Accepts only bridge messages; whitelists the
   kinds and reasons in the block log; rate-limits messages per tab; takes the
   frame address from `sender.url` (origin and path only); tokens last 3 s
-  (15 s for right-click "Open link in new tab"), at most 4 per tab, and only
+  (8 s for right-click "Open link in new tab"), at most 4 per tab, and only
   fit a new tab on the site they were minted for. Tokens for links the user
   clicked fit only the exact page (origin and path).
 - **Page-wide listener detection.** Listeners on `window`, a document, a
@@ -47,6 +57,11 @@ First public release.
   at least 40% of the viewport, or an element that wasn't on the click's path
   cannot open tabs, unless the clicked element's own framework handler is
   running.
+- **Non-interactive listener rule.** A cross-site popup from a listener where
+  nothing between the clicked element and the listener looks clickable (an
+  interactive element, or a pointer-like cursor) is refused
+  (`non-interactive-listener`). This catches ad scripts that attach a
+  listener to every element on the page.
 - **Invisible overlay guard, judged by paint.** A click that lands on an
   element covering at least 35% of the viewport that paints nothing visible is
   refused, however the element is stacked (no positioning requirement: grid,
@@ -55,6 +70,8 @@ First public release.
   or no visible content inside: text with a transparent `color` or
   `-webkit-text-fill-color` counts as invisible, gradients count only if a
   colour stop is visible, and media must cover a real share of the element.
+  If nothing visible is found within the first 300 nodes, the element counts
+  as invisible (fail closed).
   The element under the pointer inside a closed shadow root is measured via
   `chrome.dom.openOrClosedShadowRoot`. Full-page `<a target="_blank">` ad
   layers are blocked at the click.
@@ -74,22 +91,32 @@ First public release.
 - **Redirect guard (Navigation API).** Cross-site script redirects of the
   current tab are blocked when they happen during a click but don't come from
   an element-scoped handler, or come from a timer or `<meta refresh>` within
-  5 s of a click. Sign-in and payment pages of known providers are exempt.
-  On-load and user-initiated navigations still work. A suspicious
+  5 s of a click. Hand-offs to listed sign-in and payment flows are allowed
+  (but followed by the background) once the tab-under, popup-hijack and
+  Strict rules have been checked. On-load and user-initiated navigations
+  still work. A suspicious
   navigation to the same site is let through but followed (see redirect
   chains below).
 - **Smart and Strict redirect policy.** Smart (the default) allows a script
   redirect more than about 5 s after the last click, so payment pages handing
   off to a bank keep working; this is a documented, accepted trade-off.
   Strict blocks every script-driven cross-site redirect once the user has
-  interacted with the page, however long it waits.
+  interacted with the page, however long it waits, including redirects to
+  sign-in and payment pages. The popup and welcome page explain the two modes
+  by this trade-off.
 - **Tab-under detection.** Opening this same page (any query string) in a new
   tab is blocked. After any new tab is opened from a tab, script-driven
   cross-site redirects of that tab are blocked for up to 60 s, until the user
-  presses something again at least 0.5 s later. The background remembers the
-  new tab per tab, so a hop to another page of the same site can't erase it.
+  presses something again at least 0.5 s later. The rule is armed when a
+  script-opened tab is allowed, or when the background confirms that a new
+  tab really opened (link clicks, right-clicks). The background remembers the
+  new tab per tab, so a hop to another page of the same site can't erase it,
+  and forgets it when the user navigates the tab themselves (typed URL,
+  bookmark, address bar).
 - **Popup-hijack guard.** A popup that has not received any user gesture yet
-  cannot be sent to another site (sign-in and payment pages excepted).
+  cannot be sent to another site. A tab opened on weak evidence learns so
+  from the background on its first page, so the guard applies even when it
+  was opened with `noopener`.
 - **Embedded-frame hijack guard.** When a cross-site player iframe tries to
   navigate the whole tab (`top.location = ad`) within 6 s of a click inside a
   frame, with no click on the main page since and while the page has focus
@@ -102,13 +129,16 @@ First public release.
 - **Background backstop.** `webNavigation.onCreatedNavigationTarget` closes any
   new tab a page opened without a matching token from the bridge. It also
   covers `blob:`, `about:`, `data:` and `file:` source tabs. When a script
-  swaps the address of a link the user clicked, the backstop closes the ad
-  tab and opens the page the user actually clicked (`link-swapped`).
+  swaps the address of a link the user clicked (left, middle or modifier
+  click), the backstop closes the ad tab and opens the page the user actually
+  clicked (`link-swapped`). Right-click opens are not repaired.
 - **Redirect-chain following.** Tokens that rest on page-influenced evidence
-  (framework or async hints), same-site-only tokens, and suspicious same-site
-  navigations of the current tab are followed by the background through
-  `webNavigation.onCommitted` for 8 s. Landing on an unrelated site closes the
-  new tab or sends the tab back (`redirect-chain`).
+  (framework or async hints), same-site-only tokens, suspicious same-site
+  navigations of the current tab and sign-in / payment hand-offs are followed
+  by the background through `webNavigation.onCommitted` for 8 s. Only real
+  redirect hops (server or client redirects) are judged, never the user's
+  typed URL, bookmark, link click, back / forward or reload. Landing on an
+  unrelated site closes the new tab or sends the tab back (`redirect-chain`).
 - **Link tokens.** `_blank` link clicks, ctrl / middle-click and right-click
   "Open link in new tab" on real, non-decoy links get a token for that link's
   address; links inside closed shadow roots are found via
@@ -126,8 +156,12 @@ First public release.
 - **Async/await attribution.** Opens after `await` inside an element's (or
   framework's) handler are allowed within 5 s of a real click on a real
   target, but only when the element handler is the bottom of the synchronous
-  stack, and only to the same site or to a sign-in or payment page of a known
-  provider (`PS.looksLikeAuthOrPay`: not a provider's open redirectors).
+  stack, and only to the same site or to a listed sign-in or payment flow.
+- **Exact sign-in and payment exemption.** `PS.isProviderFlow` matches only
+  `https:` URLs on an exact list of provider hosts, each with the path prefix
+  where its flow starts (`PROVIDER_FLOWS` in `src/common.js`). Whole domains,
+  multi-tenant identity domains and URLs that merely carry `client_id=` are
+  not exempt.
 - **Survives `document.open()`.** Script-built frames (chat widgets, ad boxes)
   that rewrite themselves keep PopShield's listeners and channel, without a new
   handshake.
@@ -139,11 +173,14 @@ First public release.
   after you interact with the page, redirect it to another site; real links,
   ctrl/middle-click, "Open link in new tab" and forms you submit still work)
   and Off. Embedded frames follow the mode of the page that contains them.
+  Per-site choices made in incognito tabs are kept in memory only.
 - **Toolbar popup.** Badge count of blocked items, a list of everything blocked
   on the page with an **Open** button for each and a plain-language reason
   (including "went through a redirect that ended on an unrelated site" and "a
   script swapped the link you clicked for an ad; the real link was opened
-  instead"), and the mode switch. Light and dark themes.
+  instead", "the button you pressed was re-wired to submit an ad form" and
+  "opened by a script on something that isn't a button or link"), and the
+  mode switch. Light and dark themes.
 - **Lifetime counter.** The popup shows "N popups & redirects blocked since
   <date> · N today" with a 14-day sparkline and a **Reset stats** link. Only
   anonymous counts (total, per day, per kind) are stored, on this device.
@@ -161,6 +198,8 @@ First public release.
   only one is Smart mode's delayed redirect, an accepted trade-off. Also a
   popup UI test (`test/popup-ui.mjs`) with screenshots, and a live checker
   (`npm run test:live -- <url>`) for real sites.
+- **Performance.** About 0.1 ms of PopShield work per click, with no forced
+  layouts and no leaks (measured in two internal performance audits).
 
 ### Security
 
@@ -168,6 +207,10 @@ First public release.
   `persist-credentials: false` and install with `npm ci --ignore-scripts`.
 - Releases are built and tested by a read-only job; a separate minimal job
   publishes the GitHub Release with a build-provenance attestation.
+- `scripts/package.mjs` refuses to package symlinks and stray files
+  (`*.orig`, `*.rej`, `*.bak`, editor leftovers, dotfiles).
+- Three internal security audits; after the fixes from the latest one, no
+  release blockers remain.
 
 ### Privacy
 
@@ -176,6 +219,8 @@ First public release.
   lives in session storage under its tab and is wiped when the tab navigates or
   closes and when the browser exits. The worker's short-lived working state
   (tokens, redirect-chain watches, per-tab timestamps) stays in memory only.
+- Per-site modes chosen in incognito are kept in `chrome.storage.session`
+  only and never written to disk.
 - No telemetry, no remote code, no remote lists, no network requests. No share
   or social features.
 

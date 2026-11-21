@@ -44,7 +44,11 @@ flowchart TD
         D21 --> D22["22. A tab-under memory that survives"] --> D23["23. Forms in the same task"]
         D23 --> D24["24. Smart and Strict: one honest trade-off"]
     end
-    A --> B --> C --> D --> E --> F --> G
+    subgraph H["The final audits"]
+        D25["25. Remember what you pressed"] --> D26["26. Listeners on everything"]
+        D26 --> D27["27. An exact list of sign-in pages"] --> D28["28. Keeping a click cheap"]
+    end
+    A --> B --> C --> D --> E --> F --> G --> H
 ```
 
 - [1. Asking about intent instead of keeping a blacklist](#1-asking-about-intent-instead-of-keeping-a-blacklist)
@@ -71,6 +75,10 @@ flowchart TD
 - [22. A tab-under memory that survives a page change](#22-a-tab-under-memory-that-survives-a-page-change)
 - [23. Forms count only in the same task as your action](#23-forms-count-only-in-the-same-task-as-your-action)
 - [24. Smart and Strict: one honest trade-off](#24-smart-and-strict-one-honest-trade-off)
+- [25. Remembering what you pressed](#25-remembering-what-you-pressed)
+- [26. Listeners on everything](#26-listeners-on-everything)
+- [27. An exact list of sign-in and payment pages](#27-an-exact-list-of-sign-in-and-payment-pages)
+- [28. Keeping a click cheap](#28-keeping-a-click-cheap)
 
 ---
 
@@ -395,6 +403,15 @@ const type = R_apply(evType, e, []);                              // later: read
 Messages are built on objects with no shared toolbox at all
 (`Object.create(null)`), so a swapped `toJSON` has nothing to attach to.
 
+The rule is "every tool", and the final security audit held the code to it.
+It found a few tools still used live: the pattern matcher (a saved
+`RegExp.prototype.test` quietly looks up the *live* `exec` inside, so the
+saved copy is now `exec` itself), `querySelectorAll`, the readers for
+`document.body` and `document.documentElement`, `Object.getPrototypeOf`,
+`Promise.reject` and `DOMException`. All are saved now. Even `for...of` loops
+were replaced with plain counting loops, because `for...of` asks the shared
+array toolbox for its iterator, and a page can swap that too.
+
 The cost: the code is harder to read (`R_apply(strToLower, s, [])` instead of
 `s.toLowerCase()`), and every new tool must be added to the saved list. A
 mistake here is now a reliability bug, not a security hole.
@@ -530,14 +547,10 @@ Even when the hint says "yes", the bridge only allows the open if you really
 clicked (not on an overlay or ad layer) less than 5 seconds ago, and the
 address is on this site or is a sign-in or payment page of a known provider.
 That last rule came from another red-team test: a button that waited, then
-opened an ad site. It was tightened once more when the red team noticed that
-big providers also run "open redirectors", addresses on their own site that
-forward you anywhere. Being on a provider's site isn't enough any more; the
-address must look like the start of a sign-in or payment
-(`PS.looksLikeAuthOrPay()` in `common.js`: a path such as `/oauth`, `/login`
-or `/checkout`, or sign-in parameters such as `client_id`). And because the
-whole decision rests on a hint, the ticket is weak, and the worker follows the
-tab (decision 20).
+opened an ad site. What exactly counts as a "sign-in or payment page" was
+tightened twice more; decision 27 tells that story. And because the whole
+decision rests on a hint, the ticket is weak, and the worker follows the tab
+(decision 20).
 
 ```js
 btn.addEventListener('click', async () => {   // a button's listener...
@@ -575,7 +588,8 @@ The guard leaves alone everything that's yours (links you click, addresses you
 type, reloads, back and forward, downloads) and every move within the same
 site. Of the rest, it blocks moves made during a click by a page-wide hook, an
 overlay, an ad layer or a mouse-down, and moves made by a timer or
-`<meta refresh>` right after a click, except to sign-in and payment providers.
+`<meta refresh>` right after a click, except to sign-in and payment pages
+(decision 27).
 
 Tab-unders taught a lesson about time limits. The first version blocked a
 redirect for 2 seconds after a script-opened tab. An ad that waits 3 seconds
@@ -588,8 +602,12 @@ signature of a tab-under, that's blocked too, with anything after `?` ignored
 so a cache-busting address doesn't disguise it.
 
 The same thinking produced the popup-hijack rule: a popup that nobody has
-clicked in yet may not be sent to another site (sign-in providers excepted,
-because sign-in flows bounce between them).
+clicked in yet may not be sent to another site. It used to make an exception
+for sign-in pages, and so did the tab-under rule; decision 27 explains why
+they no longer do. A page can also open its popup with `noopener`, which hides
+from the popup who opened it. So when the worker allows a new tab on thin
+evidence (decision 20), it tells the tab's first page so, and the
+popup-hijack rule applies there as well.
 
 A move to the **same site** is never cancelled, because sites hop between
 their own pages constantly. But a red team sent the tab to a same-site
@@ -738,6 +756,17 @@ privacy as a rule, not a setting:
   few seconds. It is kept in the worker's memory only, never written to
   storage, and dropped when the tab closes. The tab-under memory (decision 22)
   is just a timestamp per tab.
+- **Incognito stays incognito.** Your mode choices are the one place a site
+  name is saved, because you asked for it. But a choice made in a private
+  window would reveal a site you visited privately. So per-site modes chosen
+  in incognito live in session memory only and vanish when the browser
+  closes. Incognito pages ask the worker for their mode, since only the
+  worker can tell which memory applies.
+- **Honest about being visible.** A page can notice PopShield (its popups get
+  refused, `window.open` has been replaced) and use that as one more clue to
+  recognise your browser, which is called fingerprinting. Hiding an extension
+  completely isn't possible, and pretending otherwise would be dishonest, so
+  the privacy policy says so.
 - **Report buttons instead of telemetry.** To learn where ads get through, the
   popup opens a pre-filled public GitHub issue that you read, edit and submit
   yourself. The pre-filled address has everything after `?` removed, because
@@ -891,11 +920,17 @@ The old check saw text and a background image, and concluded "visible".
 So the question changed to the one that matters to you: **does this element
 paint anything you could see?** The positioning requirement was dropped.
 `hasVisiblePaint()` walks the element and everything inside it (up to 300
-nodes; a bigger subtree is assumed visible) and stops at the first thing that
-shows: text whose colour *and* fill colour are visible, at a readable size; a
+nodes) and stops at the first thing that shows: text whose colour *and* fill colour are visible, at a readable size; a
 background colour or picture that shows, where a gradient counts only if one
 of its colours does; or a picture, video or canvas covering a real share of
 the element. Each also needs an effective opacity of at least 0.2.
+
+What if the walk reaches 300 nodes and has found nothing? The first version
+said "a subtree that big must show something", and an audit pointed out the
+obvious trick: pad an invisible overlay with 300 empty elements. Now it
+**fails closed**: nothing visible within the first 300 nodes means glass.
+Real content almost always shows something early on, so this costs honest
+pages nothing.
 
 The cost: walking an element's contents takes a little longer than reading
 one style, and "a real share" (10%) and "readable" (6 pixels) are judgement
@@ -935,11 +970,20 @@ shoulder all day. So only thin evidence earns a tail:
 - a new tab approved on a **same site only** ticket (a decoy link, or a
   modifier-click where no link was seen);
 - the tab you're on, after the redirect guard let a **suspicious same-site
-  move** through.
+  move**, or a hand-off to a sign-in or payment page, through.
 
-For 8 seconds, landing on the opener's site, the ticket's site, or a
-provider's sign-in or payment page is fine. Landing anywhere else closes the
-new tab, or sends your tab back, and logs `redirect-chain`.
+For 8 seconds, landing on the opener's site, the ticket's site (or the
+provider's site, for a hand-off), or a listed sign-in or payment page is
+fine. Landing anywhere else closes the new tab, or sends your tab back, and
+logs `redirect-chain`.
+
+An audit found that the tail was too eager. It judged *every* page the tab
+landed on, including pages you went to yourself: type an address into a
+followed tab within 8 seconds and the worker would "undo" your own
+navigation. The browser labels each navigation with how it happened, so the
+tail now acts only on **redirect hops**, the ones the browser marks as a
+server or script redirect. A typed address, a bookmark, a link click, Back,
+Forward or Reload is never treated as part of the chain.
 
 The cost: when your own tab is the one being followed, the ad page has
 already loaded by the time the worker presses Back; you may see it flash. And
@@ -976,7 +1020,12 @@ if (swapped) chrome.tabs.create({                        // and if the user did 
 ```
 
 Decoy links (`#`, `javascript:`) are left out of the repair, because their
-"real" address is just this page.
+"real" address is just this page. So are right-clicks: the context menu can
+stay open for seconds, and the "Open link in new tab" you pick may come from
+another link than the one the ticket was minted for, so there is no reliable
+"page you meant". Their tickets also live a shorter 8 seconds now, instead of
+15, which is plenty for a human and less for an ad to aim at. Decision 25
+adds a second, earlier line of defence against swaps.
 
 The cost: the repair opens a tab the page didn't ask for (but you did). And a
 site that honestly rewrites a link's address during your click, as some
@@ -1014,6 +1063,15 @@ followed by the `click` of the very same press, which reset the rule. Now it
 takes a new **press** (a button, a key, a finger), at least half a second
 after the new tab, which the click of the same press can't provide.
 
+The final audit then looked at when the memory starts and ends. It starts the
+moment the bridge allows a *script* to open a tab, because the ad's redirect
+can follow in the same breath. For a link you click or right-click, it starts
+only once the worker confirms that a new tab really opened: a right-click
+menu you close without choosing anything shouldn't freeze your tab. And it
+ends when you take the tab somewhere yourself, by typing an address, using a
+bookmark or the address bar; a script's navigation can't end it, because the
+browser doesn't label those as yours.
+
 Why a 60-second limit, after decision 11 warned against time limits? Because
 the limit is now a ceiling, not the main defence. The rule still ends the
 moment you press something; the minute is there so that a tab you've left
@@ -1042,7 +1100,8 @@ your click. When a page's timer submits, it doesn't. So the bridge marks your
 click (or Enter) as "current", clears the mark with a zero-length timer, and
 accepts a native submit only while the mark is there, only if your click was
 inside the form's submit button, on a real target, and that button isn't an
-overlay.
+overlay. Decision 25 adds one more condition: the button must still be wired
+to the same form it was when you pressed it.
 
 The cost: a site that submits a new-tab form from its own timer after your
 click is blocked.
@@ -1076,18 +1135,156 @@ protects nothing. So the choice is explicit:
 - **Smart** (the default) allows a script redirect more than ~5 seconds after
   your last click. Checkouts keep working; a patient ad gets through.
 - **Strict** blocks every script-driven move to another site once you've
-  interacted with the page, however long it waits. Sign-in and payment pages
-  of the known providers, and moves made by the element you clicked while your
-  click is still being delivered, still go through.
+  interacted with the page, however long it waits, sign-in and payment pages
+  included (decision 27). Only moves made by the element you clicked while
+  your click is still being delivered go through.
 
 The attack stays in the test suite as a `knownBypass` (decision 16), and its
 Strict twin must pass. Anyone reading the test output sees the trade-off
 every time.
 
+The popup and the welcome page explain the two modes in exactly these terms:
+Smart keeps payment pages that hand you off to your bank a few seconds after
+your click working; Strict is maximum protection, and no script may move a
+page you've used to another site.
+
 The cost: Smart users are exposed to patient redirects; Strict users may have
 to press **Open** in the popup for a bank hand-off.
 
 Proof: `rt-delayed-redirect` (known bypass in Smart, blocked in Strict).
+
+## 25. Remembering what you pressed
+
+Decision 18 measured the page as your click arrives, at `pointerup`. The
+third security audit pointed at the moment before that: the time between
+pressing and releasing, when your finger is down and your mind is made up.
+Page code runs on `pointerdown` and `mousedown` too, and in that moment it can:
+
+```js
+link.addEventListener('pointerdown', () => {        // you've just pressed a real link...
+  link.href = AD;                                   // ...it now points at the ad
+});
+button.addEventListener('pointerdown', () => {      // you've just pressed "Search"...
+  button.setAttribute('form', 'hidden-ad-form');    // ...it now submits the ad's hidden form
+});
+```
+
+When you release, the browser follows the link or submits the form, and it is
+a genuine click by you. Every check after that says "yes".
+
+So the bridge now takes a small **press-time snapshot**. On the press, before
+any page listener runs, it notes the link under your pointer and its address,
+and the button you pressed with its form, its type and its `formtarget` /
+`formaction` settings. When the click arrives, it compares. A link that now
+points to **another site** is cancelled (`link-swapped`), and a button whose
+wiring changed has its submit refused (`form-swapped`). A link changed to
+another page of the same site is left alone; some sites legitimately add
+tracking details to their own links, and decision 21's exact-page ticket
+already covers new tabs.
+
+Keys needed care. Enter and Space can activate a link or button, so they take
+a snapshot. Every other key just throws the old snapshot away, which means
+typing in a search box costs nothing extra.
+
+The cost: a short walk along the event's path at each press, and a
+same-site link rewrite during a press is still allowed.
+
+## 26. Listeners on everything
+
+The page-wide rule (decision 4) catches one listener that hears every click.
+An audit described the opposite pattern: an ad script that attaches a small
+listener to **every** element on the page. Each listener is on a small
+element, so none is page-wide; together they hear everything, and the click
+you made on a paragraph of text opens an ad.
+
+What separates a real "open" button from a paragraph? It looks clickable.
+Websites mark clickable things either by using a link, button or form field,
+or by giving them a pointing-hand mouse cursor. So for a popup to **another
+site**, the bridge walks from the element you clicked up to the element whose
+listener is running, and asks whether anything along that short route looks
+clickable: an interactive element, or a cursor other than the normal arrow or
+text cursor. If nothing does, the open is refused as
+`non-interactive-listener`.
+
+The rule is deliberately narrow. Same-site opens are untouched, and so is any
+open made inside a recognised framework handler (decision 9), whose wrapper
+element often isn't clickable itself.
+
+The cost: a site that opens another site from a listener on plain text or a
+picture, with no pointer cursor, is blocked in Smart. And it's a heuristic a
+determined page can satisfy: an ad layer styled with `cursor: pointer` passes.
+That has to be aimed at PopShield on purpose, and the other rules still
+apply.
+
+## 27. An exact list of sign-in and payment pages
+
+Logging in with a big provider, or paying through one, often moves your tab
+to another site without a fresh click: after an `await`, after a server
+round trip, after a few seconds. PopShield has always made room for that. How
+it recognised those pages changed three times.
+
+First it trusted a list of **provider domains**. The red team pointed out
+open redirectors on those domains (decision 10), so the address also had to
+**look like** a sign-in or payment: a path containing `/login` or `/checkout`,
+or a `client_id=` parameter. The final security audit found that still too
+loose, in three ways:
+
+- **Pages write the query string.** Anything after `?` is chosen by whoever
+  builds the address, so "has `client_id=`" proved nothing.
+- **Paths are broad.** A provider runs thousands of pages; plenty contain
+  `/login` or `/pay` and also forward visitors elsewhere.
+- **Some domains belong to everyone.** Hosted sign-in services give each
+  customer a sub-address on the service's domain. Anyone can sign up, put
+  content there and borrow the trust.
+
+Now `PROVIDER_FLOWS` in `common.js` is a list of **exact host names, each
+with the path where its flow begins**: GitHub's authorize page, Stripe's
+checkout host, a Microsoft tenant's `oauth2` path, and so on. Only `https:`
+counts. Multi-tenant services aren't on the list at all.
+
+```js
+['github.com', /^\/login\/oauth\/authorize/],   // exactly this host, and a path starting like this
+['checkout.stripe.com', /^\//],                   // this whole host is the checkout
+```
+
+The audit also looked at the **order** of the redirect guard's questions.
+The sign-in exemption used to be asked first, so a tab-under or a popup
+hijack aimed at a sign-in page went through, and Strict's "no script may move
+this page" had a hole shaped like every provider. Now the exemption is asked
+only after the tab-under, popup-hijack and Strict checks. And when it does
+allow a move, the bridge asks the worker to follow the tab (decision 20),
+with the provider's site added to the allowed landings, in case the
+"sign-in page" forwards somewhere else.
+
+The cost: a sign-in or payment service not on the list (a smaller provider,
+a company's own hosted sign-in) is treated like any other site; an `await`
+before opening it is blocked, and you may need **Open** in the popup. In
+Strict mode, even listed sign-in pages need a direct click.
+
+## 28. Keeping a click cheap
+
+PopShield runs on every press, click and key of every page, so its own cost
+matters. A second performance audit measured it after all the changes above,
+and a few small things added up:
+
+- Asking Chrome to look inside a shadow root (decision 5's closed-shadow-root
+  helper) takes a few microseconds, and it was asked several times per click.
+  Only some elements can host a shadow root at all (custom elements, `div`,
+  `span`, `section` and a handful of others), so links, buttons, pictures and
+  form fields are no longer asked.
+- The most common "transparent" colour value is now recognised directly
+  instead of being parsed by a pattern each time, and the list of media tags
+  is a set rather than a pattern.
+- Typing doesn't take press snapshots (decision 25), in the bridge or in
+  `inject.js`.
+
+The result: about **0.1 milliseconds** of PopShield work per click, no forced
+page layouts, and no memory that grows over time. The same audit round
+included a third security audit; with decisions 25 to 27 in place, neither
+found anything that should block a release.
+
+The cost: the "which elements can host a shadow root" list must follow the
+web standard if it ever grows.
 
 ### Check your understanding
 
@@ -1100,6 +1297,8 @@ Proof: `rt-delayed-redirect` (known bypass in Smart, blocked in Strict).
 5. Why is the geometry measured as your click arrives, and not when the ad asks?
 6. Which attack does Smart mode let through on purpose, and what would
    blocking it break?
+7. Why isn't "the address contains `client_id=`" enough to call it a sign-in
+   page?
 
 <details><summary>Answers</summary>
 
@@ -1122,6 +1321,8 @@ Proof: `rt-delayed-redirect` (known bypass in Smart, blocked in Strict).
 6. A script redirect more than about 5 seconds after your click. Blocking it
    in the default mode would break payment pages that hand you off to your
    bank after a wait; Strict blocks it for sites you don't trust.
+7. Everything after `?` is written by whoever builds the address, including
+   an ad script. PopShield trusts only exact hosts and paths it knows.
 
 </details>
 

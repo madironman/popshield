@@ -105,9 +105,11 @@ Both PopShield content scripts start at `document_start`.
 ### The press and the click
 
 You press the mouse button: `pointerdown` and `mousedown` events travel
-through the page. The bridge notes the time of the press, but these events
-aren't activating, so nothing else happens. You release: `pointerup`,
-`mouseup`, then `click`.
+through the page. These events aren't activating, so they can't open
+anything. The bridge notes the time of the press, and **what** you pressed:
+the link under your pointer and its address, or the button and the form it
+belongs to (here, the Play button). Chapter 3 shows why that matters. You
+release: `pointerup`, `mouseup`, then `click`.
 
 The moment `pointerup` arrives, before any page listener has heard it, the
 bridge takes its photo, a **[snapshot](glossary.md#snapshot)** of the page:
@@ -161,7 +163,7 @@ sequenceDiagram
     participant SW as background.js
 
     U->>BR: press: pointerdown, mousedown
-    Note over BR: press time noted, not activating
+    Note over BR: press time and pressed element noted, not activating
     U->>BR: release: pointerup, mouseup, click
     Note over BR: snapshot taken at pointerup, current gesture = this click
     BR->>BTN: click reaches the button
@@ -204,7 +206,9 @@ flowchart TD
     F3 -- "yes" --> X5["Blocked: invisible-overlay"]
     F3 -- "no" --> F4{"Snapshot says: clicked an ad layer?"}
     F4 -- "yes" --> X6["Blocked: ad-layer"]
-    F4 -- "no" --> G{"Opening this same page again?"}
+    F4 -- "no" --> F5{"Opening another site, from a listener with nothing clickable between it and what you clicked?"}
+    F5 -- "yes" --> X8["Blocked: non-interactive-listener"]
+    F5 -- "no" --> G{"Opening this same page again?"}
     G -- "yes" --> X7["Blocked: tab-under"]
     G -- "no" --> OK["Allowed: bridge issues a ticket, real window.open runs"]
 ```
@@ -257,6 +261,26 @@ Two more rules come from the snapshot:
   was removed, or moved somewhere else in the page before asking), it can't
   have been the element you meant to click, so it counts as page-wide too.
 
+### Listeners on everything
+
+Some ad scripts don't use one big listener. They put a small listener on
+**every** element of the page: every paragraph, every picture, every bit of
+empty space. Each listener sits on a small element, so none of them looks
+page-wide, yet together they hear every click.
+
+PopShield answers with a question about the route the click took. Between the
+element you clicked and the element whose listener is now asking, was there
+anything that **looks clickable**? That means a link, a button, a form
+field or another interactive element, or something the page itself styled
+with a "you can click this" mouse pointer (any cursor other than the normal
+arrow or the text cursor). A real Share button passes easily: you clicked
+the button, and the button is clickable. A listener on a plain paragraph
+does not.
+
+This rule only applies when the new tab would go to **another site** and no
+framework handler is running. An open with nothing clickable on that route
+gets `non-interactive-listener`.
+
 ### Mouse-down popunders
 
 Only activating events may open a tab: click, auxclick (middle click),
@@ -304,8 +328,16 @@ for (const n of everythingInside(el)) {                  // every element and pi
   if (backgroundVisible(n)) return true;                 // a background colour or picture that shows
   if (isMedia(n) && coversTenPercent(n, el)) return true;// a picture, video or canvas of real size
 }                                                        // (each also needs effective opacity of at least 0.2)
-return false;                                            // nothing visible inside: it's glass
+return false;                                            // nothing visible found: it's glass
 ```
+
+Notice the limit of 300. Looking through a huge element piece by piece would
+make every click slow, so PopShield stops after 300 pieces. If nothing
+visible turned up by then, the element counts as **glass**. An earlier
+version did the opposite and assumed a huge element was visible, and that
+invited a trick: fill an invisible overlay with hundreds of empty pieces and
+it passed. Saying "no" when unsure is called
+**[failing closed](glossary.md#fail-closed)**.
 
 Each check closes a trick a red team tried:
 
@@ -382,6 +414,15 @@ box (`rt-keystroke-requestsubmit`), or by an invisible submit button laid over
 the player (`rt-overlay-submit-button`). (`submit-button-click` blocked;
 `legit-form-blank`, `legit-form-enter-key` allowed)
 
+One more trick happens *between* your press and your click. You press a
+perfectly ordinary button, and while your finger is still down, a script
+quietly attaches that button to a different, hidden form, or changes where
+its form sends you or which tab it opens in. When you release, the browser
+submits the ad's form, and it really was your click. Remember that the bridge
+noted what you pressed (chapter 2). If the button's form, its type, or its
+`formtarget` / `formaction` settings changed since the press, the submit is
+refused and logged as `form-swapped`.
+
 Chrome also has **Document Picture-in-Picture**, which lets a page open a
 small always-on-top window. `inject.js` hooks its `requestWindow()` and asks
 the bridge exactly as for a popup.
@@ -414,6 +455,19 @@ exact page on your ticket. The worker notices that you *did* click a real
 link and closes the ad tab, then **opens the page you actually clicked** in
 its place, and logs `link-swapped` (`rt-link-href-swap-redirector`).
 
+The bridge also catches a swap earlier, on its own. It noted the link and its
+address when you pressed (chapter 2). If, by the time the click arrives, the
+same link points to **another site**, a script re-pointed it while your
+finger was down, and the bridge cancels the click right there (also logged as
+`link-swapped`). A change within the same site is left to the worker's
+exact-page check.
+
+The repair (closing the ad tab and opening your page) is only done for left,
+middle and ctrl/shift/cmd clicks. A right-click menu can stay open for a
+while, and the "Open link in new tab" you pick may come from a different link
+than the one the ticket was made for, so for right-clicks PopShield only
+closes the unexpected tab.
+
 Some links live inside a *closed* shadow root, where even the event's path
 doesn't reveal them. The bridge finds them with `chrome.dom` too
 (`legit-closed-shadow-link`).
@@ -431,6 +485,13 @@ at least half a second after the new tab, so the very click that opened it
 doesn't count as "again". This covers a tab you opened yourself with a real
 link, too: the ad's favourite moment is right after you've looked away to
 the new tab (`rt-tabunder-after-user-link`).
+
+When does the watch start? For a tab a script opened, the moment the bridge
+allows it, because the ad may redirect in the very same breath. For a link
+you click or right-click, only once the worker confirms that a new tab really
+appeared; a right-click that never turns into a new tab doesn't arm it. And
+the watch ends when you send the tab somewhere yourself: typing an address,
+picking a bookmark, using the address bar.
 
 The bridge lives inside one page, and forgets everything when the tab moves
 to another page. An ad could exploit that: hop to another page of the same
@@ -452,7 +513,10 @@ looks for a reason to object:
 
 - a tab-under (above);
 - a **popup hijack**: this is a popup nobody has clicked in yet, being sent
-  somewhere else;
+  somewhere else. A page can hide where a tab came from (by opening it with
+  `noopener`), so the worker also tells a new tab's first page when it was
+  allowed on thin evidence (a weak ticket, chapter 5), and the rule applies
+  then too;
 - in **Strict** mode, any script-driven move once you've interacted with the
   page (chapter 7);
 - a move made during a click by a page-wide listener, an overlay, an ad layer
@@ -461,9 +525,13 @@ looks for a reason to object:
   click.
 
 A move with no click in the last 5 seconds (a redirect when the page loads, a
-sign-in round trip) is left alone in Smart mode. And a **sign-in or payment
-page** of a well-known provider (chapter 4 explains how one is recognised) is
-never a reason to object.
+sign-in round trip) is left alone in Smart mode. A move to a **sign-in or
+payment page** of a well-known provider (the exact list is explained under
+"Buttons that wait before opening", below) is allowed too, but only after the
+first three checks: a provider's address can't excuse a tab-under, a popup
+hijack or a Strict-mode move. Even then, the worker follows the tab
+afterwards (see below), in case the "provider" page bounces on somewhere
+else.
 
 What happens next depends on where the move goes. To **another site**, it is
 cancelled and logged. To **this same site**, it's let through, because sites
@@ -471,8 +539,9 @@ move between their own pages all the time. But a same-site address can be a
 **redirector**, a page whose only job is to bounce you on somewhere else. So
 the bridge asks the service worker to keep an eye on the tab for 8 seconds;
 if the tab lands on an unrelated site, the worker sends it back and logs
-`redirect-chain` (`rt-redirector-navigation`). Chapter 5 shows how the worker
-follows a tab.
+`redirect-chain` (`rt-redirector-navigation`). For a sign-in or payment
+hand-off, the provider's site is added to the sites the tab may land on.
+Chapter 5 shows how the worker follows a tab.
 
 (`click-redirect`, `open-self-redirect` blocked; `legit-same-site-redirect`,
 `legit-onload-redirect` allowed)
@@ -586,22 +655,32 @@ not the button, and the hint is "no" (`rt-async-forge-redirector`).
 A page can still fake stack traces, so the bridge never trusts the hint alone.
 It also requires that you really clicked, on a real target (not an overlay or
 ad layer), less than 5 seconds ago, and that the address is on this same site
-or is a **sign-in or payment page** of a provider on a short built-in list
-(`PROVIDERS` in `common.js`: Google, Apple, Microsoft, GitHub, PayPal, Stripe
-and others).
+or is a **sign-in or payment page** on a short built-in list.
 
-"Sign-in or payment page" is checked by the address itself, with
-`looksLikeAuthOrPay()`: a path step such as `/oauth`, `/authorize`, `/login`,
-`/signin`, `/checkout` or `/pay`, or the typical sign-in parameters
-`client_id`, `redirect_uri` or `response_type`. Big providers also run "open
-redirectors", addresses that forward you anywhere you name; being on the
-provider's site isn't enough.
+That list (`PROVIDER_FLOWS` in `common.js`) is very precise. Each entry is one
+exact host name plus the beginning of the path where a sign-in or payment
+starts: for example, GitHub's "authorize this app" page, Google's accounts
+host, or Stripe's checkout host. It covers the big sign-in providers (Google,
+Apple, Microsoft, GitHub and others) and the payment providers PayPal, Stripe
+and Razorpay. Why so strict? Each looser rule was a hole:
+
+- **A whole domain is too much.** Big providers also run "open redirectors",
+  addresses that forward you anywhere you name. Being somewhere on the
+  provider's site isn't enough.
+- **Some domains belong to everyone.** Some sign-in services give every
+  customer their own sub-address (`yourcompany.<service>.com`). Anyone,
+  including an advertiser, can rent one, so those services aren't on the
+  list at all.
+- **The address's extra details are written by the page.** Everything after
+  `?` in an address is chosen by whoever builds it. An address doesn't become
+  a sign-in page just because it ends in `?client_id=...`.
 
 ```js
-function looksLikeAuthOrPay(u) {                              // does this address start a sign-in or payment?
+function isProviderFlow(u) {                                  // is this the start of a known sign-in or payment?
   const x = new URL(u);                                       // split the address into its parts
-  return /\/(o?auth\d?|authorize|signin|login|checkout\w*|pay)s?(\/|$)/i.test(x.pathname)  // a telling path step
-      || /[?&](client_id|redirect_uri|response_type)=/.test(x.search);                     // or sign-in parameters
+  if (x.protocol !== 'https:') return false;                  // only secure addresses
+  return PROVIDER_FLOWS.some(([host, path]) =>                // for each entry on the list...
+    x.hostname === host && path.test(x.pathname));            // ...the exact host AND the right path start
 }                                                             // (simplified from src/common.js)
 ```
 
@@ -634,7 +713,7 @@ service worker follows it after it opens (chapter 5).
    isn't a visible background.
 3. The bridge can't see page JavaScript objects such as React's data; only the
    MAIN world can.
-4. Blocked: after `await`, only the same site or a provider's sign-in or
+4. Blocked: after `await`, only the same site or a listed sign-in or
    payment page is allowed.
 5. The article. The ad tab doesn't match your exact-page ticket, so the worker
    closes it and opens the page you clicked instead (`link-swapped`).
@@ -726,7 +805,7 @@ little:
   page-wide rule. Overlays, ad layers and the need for a real click still
   apply.
 - "This is after `await`, in an element's handler" only allows the same site
-  or a provider's sign-in or payment page, within 5 seconds of a real click
+  or a listed sign-in or payment page, within 5 seconds of a real click
   on a real target. And if the page has tampered with how stack traces are
   written, `inject.js` reports "no".
 
@@ -793,7 +872,7 @@ The tickets are deliberately hard to misuse:
 |---|---|
 | A ticket from a script open names a destination site; the new tab must open on that site | a ticket can't be spent on an ad tab to another site opened in the same instant |
 | A ticket from a link you clicked names the **exact page** (origin and path) | a script that swaps the link for a same-site redirector can't use it |
-| Valid for 3 seconds (15 seconds for right-click "Open link in new tab") | short enough not to become a standing permission; right-click menus take a human a moment |
+| Valid for 3 seconds (8 seconds for right-click "Open link in new tab") | short enough not to become a standing permission; right-click menus take a human a moment |
 | At most 4 per tab | a page can't stockpile them |
 | "Same site only" for dead-end links and for modifier-clicks where no link was seen | an address swapped mid-click can't use it |
 | Refused from child frames for 1.5 s after a click into a barely visible frame | that click wasn't meant for the frame |
@@ -814,8 +893,13 @@ for a few blocks. When the worker spends a *weak* ticket, or a *same site
 only* ticket, it keeps watching the new tab for 8 seconds through
 `webNavigation.onCommitted`, which the browser fires every time a tab
 actually lands on a new page. If the tab lands on a site that is neither the
-opener's site nor the site the ticket was for (a provider's sign-in or payment
+opener's site nor the site the ticket was for (a listed sign-in or payment
 page is fine), the worker closes it and logs `redirect-chain`.
+
+The tail only cares about **redirects**: hops the page or its server made
+on its own, which the browser labels as such. If you type an address into
+that tab, pick a bookmark, click a link, go back or reload, that's you, not a
+redirect, and the worker stops following the tab.
 
 ```js
 if (tok.weak || tok.sameSiteOnly) {                         // the evidence for this tab was thin...
@@ -829,12 +913,16 @@ if (!landingOk(url, watch.allowed)) chrome.tabs.remove(tabId);  // an unrelated 
 ```
 
 The same tail follows **the tab you're on** after the redirect guard let a
-suspicious same-site move through (chapter 3). If that tab then lands on an
-unrelated site, the worker presses Back for you.
+suspicious same-site move, or a sign-in or payment hand-off, through
+(chapter 3). If that tab then redirects on to an unrelated site, the worker
+presses Back for you.
 
 Spending any ticket also tells the opener's page "a new tab just left you",
 which arms the tab-under rule from chapter 3. The worker keeps that moment per
-tab, so it survives the opener moving to another page.
+tab, so it survives the opener moving to another page, and forgets it when
+you navigate the tab yourself. When the spent ticket was weak, the worker
+also remembers that about the *new* tab, until that tab's first page asks
+"how was I opened?" (the popup-hijack rule in chapter 3).
 
 ### Check your understanding
 
@@ -875,9 +963,17 @@ stores, all inside your browser:
 // chrome.storage.session: memory only, under each tab
 {
   'log:42': [ { kind: 'popup', reason: 'page-wide-listener', url, frameUrl, time } ],  // what was blocked in tab 42
-  'count:42': 3                          // the number on PopShield's button for tab 42
+  'count:42': 3,                         // the number on PopShield's button for tab 42
+  incogSites: { 'example.org': 'off' }   // modes you picked in incognito windows (memory only)
 }
 ```
+
+**Incognito** (Chrome's private windows) gets special care. A mode you pick
+for a site while in an incognito window is kept only in memory
+(`incogSites`), never in `chrome.storage.local`, so the name of a site you
+visited privately never reaches your disk. It's forgotten when the browser
+exits. Pages in incognito ask the service worker for their mode instead of
+reading storage themselves.
 
 The counter is just numbers. The per-tab list does contain addresses (the
 blocked address, and the page's address without anything after `?`), because
@@ -887,12 +983,18 @@ when the browser exits.
 
 The service worker also keeps a little **working memory** while it does its
 job: the tickets (with the address each is for), the tails from chapter 5
-(with the site names they allow), and the moment each tab last opened a tab.
+(with the site names they allow), the moment each tab last opened a tab, and
+which new tabs were opened on thin evidence.
 None of it is ever written to storage. Tickets expire within seconds, tails
 after 8 seconds, and all of it is dropped when the tab closes or the worker
 is stopped.
 
-PopShield makes no network requests and has no telemetry. The **Report**
+PopShield makes no network requests and has no telemetry. One honest caveat:
+a page *can* notice that PopShield is installed, for example because its
+popups get refused or because `window.open` has been replaced. A tracker
+could use that as one more clue to tell browsers apart (this is called
+**fingerprinting**). PopShield doesn't try to hide; it simply has nothing to
+tell the page. The **Report**
 buttons in the popup only open a pre-filled GitHub issue page in a new tab;
 nothing is sent unless you submit that form yourself. There are no share
 buttons.
@@ -929,7 +1031,7 @@ Frames inside a page (such as a video player) follow the page's mode.
 | Mode | Scripts opening tabs | Links and forms you use | Redirects of your tab |
 |---|---|---|---|
 | **Smart** (default, the normal setting) | the bouncer's rules | allowed | the guards in chapter 3; a script redirect more than ~5 s after your last click is allowed |
-| **Strict** (maximum protection) | never | allowed, including ctrl-click, middle-click and right-click "Open link in new tab" | the guards in chapter 3, and once you've interacted with the page, no script may send the tab to another site, however long it waits |
+| **Strict** (maximum protection) | never | allowed, including ctrl-click, middle-click and right-click "Open link in new tab" | the guards in chapter 3, and once you've interacted with the page, no script may send the tab to another site, however long it waits, sign-in and payment pages included |
 | **Off** | untouched | untouched | untouched; the backstop is off too |
 
 ### The one trade-off between Smart and Strict
@@ -950,10 +1052,10 @@ bug.
 
 Strict mode makes the opposite choice. Once you've clicked or pressed a key on
 a page, no script may send that tab to another site on its own, however long
-it waits. Two things still work: a provider's sign-in or payment page, and a
+it waits, and that includes sign-in and payment pages. What still works is a
 move made by the element you clicked while your click is still being
-delivered. A bank hand-off that goes elsewhere may be stopped; you'll see it
-in the list, with an **Open** button.
+delivered. A delayed payment or sign-in hand-off may be stopped; you'll see it
+in the list, with an **Open** button, or you can set that one shop to Smart.
 
 So: keep Smart as your everyday setting, and switch a site you don't trust to
 Strict.
@@ -990,12 +1092,20 @@ and a **Feedback** link.
 - **Patient redirects in Smart.** A script that waits more than about 5
   seconds after your click before moving your tab to another site gets
   through in Smart mode. Strict stops it (chapter 7).
-- **Faked frameworks.** A page that plants fake framework data on the element
-  you click *before you press it*, specifically to fool PopShield, gets the
-  framework exemption, and the bridge really approves. The tail from chapter 5
-  catches a bounce to a third site, but not an open straight to the ad.
+- **Pages built to fool PopShield.** A page that plants fake framework data
+  on the element you click *before you press it* gets the framework
+  exemption, and the bridge really approves. The tail from chapter 5 catches
+  a bounce to a third site, but not an open straight to the ad. In the same
+  way, a page can give plain content a "clickable" mouse pointer to get past
+  the listeners-on-everything check. Both have to be aimed at PopShield on
+  purpose.
+- **Being noticed.** Pages can tell PopShield is installed (chapter 6).
 - **Waiting, then opening an unrelated site.** After `await`, only the same
-  site and providers' sign-in or payment pages are allowed. Timers
+  site and the listed sign-in or payment pages are allowed. A sign-in service
+  that isn't on the exact list is treated like any other site.
+- **Popups from non-clickable content.** A site that opens another site's
+  page from a listener on plain text or a picture, with nothing clickable in
+  between, is blocked in Smart. Use **Open** in the popup. Timers
   (`setTimeout`) and `.then()` callbacks are blocked entirely. Use **Open** in
   the popup.
 - **Honest redirects right after a click** to another site (other than a
