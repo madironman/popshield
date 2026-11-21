@@ -16,8 +16,12 @@ const ctx = await chromium.launchPersistentContext(fs.mkdtempSync(path.join(os.t
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
   ignoreDefaultArgs: ['--disable-popup-blocking', '--disable-extensions'],
 });
-const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker');
+const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker', { timeout: 45000 });
 const extId = new URL(sw.url()).host;
+// Fresh install opens the welcome tab (runtime.onInstalled); wait for it and close it
+// so it is not mistaken for a tab opened by the popup.
+for (const end = Date.now() + 3000; Date.now() < end && !ctx.pages().some((p) => p.url().startsWith('chrome-extension://'));) await new Promise((r) => setTimeout(r, 50));
+for (const p of ctx.pages()) if (p.url().startsWith('chrome-extension://')) await p.close().catch(() => {});
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? 'pass' : 'FAIL'}  ${msg}`); if (!cond) failed++; };
 

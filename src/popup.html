@@ -46,6 +46,15 @@
   .report button:hover { border-color: var(--accent); }
   .fineprint { color: var(--muted); font-size: 11px; margin-top: 6px; }
   footer a { color: var(--accent); margin-left: auto; text-decoration: none; }
+  .stats { padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--card); }
+  .stats .big { display: flex; align-items: baseline; gap: 6px; }
+  .stats .num { font-size: 26px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stats .sub { color: var(--muted); font-size: 12px; }
+  .stats .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 22px; flex: 1; }
+  .spark i { flex: 1; background: var(--accent); opacity: .55; border-radius: 1px; min-height: 1px; }
+  .spark i.today { opacity: 1; }
+
 </style>
 </head>
 <body>
@@ -56,6 +65,13 @@
     </div>
     <span id="count"></span>
   </header>
+  <div class="stats" id="stats">
+    <div class="big"><span class="num" id="total">0</span><span class="sub" id="total-label">blocked</span></div>
+    <div class="sub" id="since"></div>
+    <div class="row">
+      <div class="spark" id="spark" title="Blocked per day, last 14 days"></div>
+    </div>
+  </div>
   <div id="main">
     <section>
       <div class="label">Protection on</div>
@@ -87,7 +103,8 @@
       <option value="strict">Strict</option>
       <option value="off">Off</option>
     </select>
-    <a id="feedback" href="#" title="Ideas, questions and feedback">Feedback</a>
+    <a id="reset-stats" href="#" title="Reset the lifetime counter on this device">Reset stats</a>
+    <a id="feedback" href="#" title="Ideas, questions and feedback" style="margin-left:8px">Feedback</a>
   </footer>
   <script src="common.js"></script>
   <script src="popup.js"></script>

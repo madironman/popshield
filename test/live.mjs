@@ -51,7 +51,12 @@ async function run(withExt) {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   });
   let sw = null;
-  if (withExt) sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker', { timeout: 10000 });
+  if (withExt) {
+    sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker', { timeout: 10000 });
+    // Fresh install opens the welcome tab (runtime.onInstalled); close it so it is not counted as an ad tab.
+    for (const end = Date.now() + 3000; Date.now() < end && !ctx.pages().some((p) => p.url().startsWith('chrome-extension://'));) await new Promise((r) => setTimeout(r, 50));
+    for (const p of ctx.pages()) if (p.url().startsWith('chrome-extension://')) await p.close().catch(() => {});
+  }
   const opened = [];
   const openedUrls = new Map();
   const tag = withExt ? 'ext' : 'baseline';
@@ -103,7 +108,7 @@ async function run(withExt) {
   await shot(page, `${tag}-02-after-clicks`);
   await page.waitForTimeout(1000);
 
-  const stillOpen = ctx.pages().filter((p) => p !== page).map((p) => p.url());
+  const stillOpen = ctx.pages().filter((p) => p !== page && !p.url().startsWith('chrome-extension://')).map((p) => p.url());
   let log = [];
   if (sw) {
     const all = await sw.evaluate(() => chrome.storage.session.get(null)).catch(() => ({}));

@@ -1,8 +1,13 @@
 // End-to-end tests: real Chromium, real extension, real clicks.
 //   node test/run.mjs            -> baseline (no extension) + PopShield runs
+//   node test/run.mjs <substr>   -> only cases whose name contains <substr>
+//   E2E_WORKERS=N                -> number of parallel browsers (default: cores/RAM based, max 12)
 // Each scenario is run twice:
 //   1. baseline, without the extension — proves the attack really works in Chrome
 //   2. with PopShield — must block the attack / keep legit behaviour working
+// Cases run in parallel: each worker is its own persistent Chromium profile (own
+// extension service worker + chrome.storage), and runs its cases one at a time.
+// Both passes run at the same time; all workers share one static file server.
 import { chromium } from 'playwright';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -77,6 +82,12 @@ const CASES = [
   { t: 'retry-loop-popunder', act: 'play', tabs: 0, url: 'same', played: true, blocked: ['popup'], maxBlocked: 5, baseline: { tabs: 1 },
     note: '301 blocked attempts collapse to a couple of log entries' },
   { t: 'legit-max-z-modal', act: '#manage', tabs: 1, url: 'same', blocked: [], baseline: { tabs: 1 } },
+  // ------------------------------------------------------------ async targets, wrappers, SVG links
+  { t: 'async-cross-site-element', act: '#btn', tabs: 0, url: 'same', blocked: ['popup'], baseline: { tabs: 1 },
+    note: 'element handler opening an ad site after an await is blocked; only same-site/sign-in/payment targets are allowed after an await' },
+  { t: 'wrapper-div-popunder', act: 'play', tabs: 0, url: 'same', played: true, blocked: ['popup'], baseline: { tabs: 1 } },
+  { t: 'legit-react17-root', act: '#btn', tabs: 1, url: 'same', blocked: [], baseline: { tabs: 1 } },
+  { t: 'svg-link-dispatch', act: 'play', tabs: 0, url: 'same', played: true, blockedAny: ['scripted-link', 'new-tab'], baseline: { tabs: 1 } },
   // ------------------------------------------------------------ modes
   { t: 'doc-click-popunder', name: 'mode-off: popunder allowed', mode: 'off', act: 'play', tabs: 1, url: 'same', played: true, blocked: [], baseline: null },
   { t: 'click-redirect', name: 'mode-off: redirect allowed', mode: 'off', act: 'play', tabs: 0, url: 'ad', blocked: [], baseline: null },
@@ -97,9 +108,38 @@ async function launch(withExt) {
     viewport: { width: 1000, height: 700 },
     acceptDownloads: true,
   });
-  let sw = null;
-  if (withExt) sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker', { timeout: 10000 });
-  return { ctx, sw };
+  const env = { ctx, dir, withExt, sw: null };
+  if (withExt) {
+    env.sw = await extWorker(env);
+    await closeWelcome(ctx);
+  }
+  return env;
+}
+
+// A fresh install opens the extension's welcome tab (runtime.onInstalled); it is not
+// part of any scenario, so close it once and never count extension pages as tabs.
+const isExtPage = (p) => p.url().startsWith('chrome-extension://');
+async function closeWelcome(ctx) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && !ctx.pages().some(isExtPage)) await new Promise((r) => setTimeout(r, 50));
+  for (const p of ctx.pages().filter(isExtPage)) await p.close().catch(() => {});
+}
+
+// The extension's service worker; re-fetched per case in case Chrome restarted it.
+async function extWorker(env) {
+  const live = env.ctx.serviceWorkers().find((w) => w.url().startsWith('chrome-extension://'));
+  if (live) return (env.sw = live);
+  // Poll as well as listen: under heavy load the worker can register before
+  // our listener is attached, or take a while to start.
+  const deadline = Date.now() + 45000;
+  const ev = env.ctx.waitForEvent('serviceworker', { timeout: 45000 }).catch(() => null);
+  while (Date.now() < deadline) {
+    const w = env.ctx.serviceWorkers().find((x) => x.url().startsWith('chrome-extension://'));
+    if (w) return (env.sw = w);
+    const got = await Promise.race([ev, new Promise((r) => setTimeout(() => r(null), 200))]);
+    if (got) return (env.sw = got);
+  }
+  throw new Error('extension service worker did not start within 45 s');
 }
 
 async function center(page, sel) {
@@ -137,9 +177,9 @@ async function act(page, how) {
     const humanClick = async () => { await page.mouse.move(x, y); await page.mouse.down(); await page.waitForTimeout(90); await page.mouse.up(); };
     await humanClick();
     if (how === 'iframe-human-x2') { await page.waitForTimeout(2500); return humanClick(); } // 2nd click well after focus moved in
-    await page.waitForTimeout(2000); // user watches a bit, then reloads / types a URL
-    if (how === 'iframe-wait-reload') return page.reload().catch(() => {});
-    return page.goto('http://127.0.0.1:8712/ad.html?typed').catch(() => {});
+    await page.waitForTimeout(4500); // user watches a bit, then reloads / types a URL
+    if (how === 'iframe-wait-reload') return page.reload({ timeout: 5000 }).catch(() => {}); // a (wrongly) blocked navigation must not stall for 30s
+    return page.goto('http://127.0.0.1:8712/ad.html?typed', { timeout: 5000 }).catch(() => {});
   }
   if (how.startsWith('iframe-then:')) {
     await act(page, 'iframe');
@@ -164,8 +204,9 @@ function urlKind(u, start) {
 }
 
 async function runCase(env, c, withExt) {
-  const { ctx, sw } = env;
+  const { ctx } = env;
   for (const p of ctx.pages()) await p.close().catch(() => {});
+  const sw = withExt ? await extWorker(env) : null;
   if (sw) {
     await sw.evaluate(async ({ mode, site }) => {
       await chrome.storage.local.set({ defaultMode: mode, sites: site });
@@ -187,7 +228,7 @@ async function runCase(env, c, withExt) {
   await act(page, c.act);
   await page.waitForTimeout(SETTLE);
 
-  const others = ctx.pages().filter((p) => p !== page);
+  const others = ctx.pages().filter((p) => p !== page && !isExtPage(p));
   const res = {
     tabs: others.length,
     tabUrls: others.map((p) => p.url()),
@@ -231,32 +272,92 @@ function check(c, r, withExt) {
   return fails;
 }
 
-const stop = startServers();
-let failed = 0;
-const summary = [];
-try {
-  for (const withExt of [false, true]) {
-    const env = await launch(withExt);
-    console.log(`\n=== ${withExt ? 'WITH PopShield' : 'BASELINE (no extension) — attacks should succeed'} ===`);
-    const only = process.argv[2];
-    for (const c of CASES) {
-      if (!withExt && !c.baseline) continue;
-      if (only && !(c.name || c.t).includes(only)) continue;
-      const r = await runCase(env, c, withExt);
-      const fails = check(c, r, withExt);
-      const name = c.name || c.t;
-      const detail = withExt ? `  blocked: [${r.blocked.map((b) => `${b.kind}/${b.reason}`).join(', ')}]` : `  tabs=${r.tabs} url=${r.url}`;
-      console.log(`${fails.length ? 'FAIL' : 'pass'}  ${name}${detail}${c.note && withExt ? `\n      note: ${c.note}` : ''}`);
-      for (const f of fails) console.log('      - ' + f);
-      if (fails.length) failed++;
-      summary.push({ withExt, name, fails });
+// Rough per-case wall time, used to start the slow cases first (longest-first scheduling).
+function cost(c) {
+  let ms = SETTLE + 600;
+  if (c.act === 'iframe-human-x2') ms += 2700;
+  else if (c.act.startsWith('iframe-wait')) ms += 2200;
+  else if (c.act.startsWith('iframe') || c.act.startsWith('frame:')) ms += 400;
+  return ms;
+}
+
+function defaultWorkers() {
+  const byMem = Math.floor(os.totalmem() / 2 ** 30); // ~1 GB per headless Chromium is plenty
+  return Math.max(2, Math.min(os.cpus().length, byMem, 12));
+}
+
+const only = process.argv[2];
+const selected = CASES.map((c, i) => ({ c, i, name: c.name || c.t })).filter((x) => !only || x.name.includes(only));
+const jobs = {
+  false: selected.filter((x) => x.c.baseline),
+  true: selected,
+};
+const total = jobs.false.length + jobs.true.length;
+if (!total) { console.log('no cases matched'); process.exit(1); }
+
+// Split the browsers between the two passes in proportion to their work.
+const W = Math.max(2, parseInt(process.env.E2E_WORKERS, 10) || defaultWorkers());
+const work = (list) => list.reduce((a, x) => a + cost(x.c), 0);
+const wB = work(jobs.false), wE = work(jobs.true);
+let nE = jobs.true.length ? Math.max(1, Math.round((W * wE) / (wB + wE))) : 0;
+let nB = jobs.false.length ? Math.max(1, W - nE) : 0;
+nE = Math.min(nE, jobs.true.length); nB = Math.min(nB, jobs.false.length);
+
+async function runPass(withExt, list, n) {
+  const queue = [...list].sort((a, b) => cost(b.c) - cost(a.c) || a.i - b.i);
+  const results = new Map();
+  const worker = async () => {
+    let env = null, launchErr = null;
+    try { env = await launch(withExt); } catch (e) { launchErr = e; }
+    try {
+      for (let x; (x = queue.shift());) {
+        let r = null, fails;
+        if (launchErr) fails = [`browser launch failed: ${launchErr.message.split('\n')[0]}`];
+        else {
+          try {
+            r = await runCase(env, x.c, withExt);
+            fails = check(x.c, r, withExt);
+          } catch (e) { fails = [`harness error: ${e.message.split('\n')[0]}`]; }
+        }
+        results.set(x.i, { r, fails });
+        process.stderr.write(fails.length ? 'F' : '.');
+      }
+    } finally {
+      if (env) {
+        await env.ctx.close().catch(() => {});
+        fs.rmSync(env.dir, { recursive: true, force: true, maxRetries: 3 });
+      }
     }
-    await env.ctx.close();
-  }
+  };
+  await Promise.all(Array.from({ length: n }, worker));
+  return results;
+}
+
+const stop = startServers();
+const t0 = Date.now();
+let res;
+try {
+  process.stderr.write(`running ${total} checks on ${nB} baseline + ${nE} PopShield browsers\n`);
+  res = await Promise.all([runPass(false, jobs.false, nB), runPass(true, jobs.true, nE)]);
+  process.stderr.write('\n');
 } finally {
   stop();
 }
-const total = summary.length;
-if (!total) { console.log('no cases matched'); process.exit(1); }
-console.log(`\n${total - failed}/${total} checks passed`);
+
+let failed = 0;
+for (const withExt of [false, true]) {
+  const list = jobs[withExt];
+  if (!list.length) continue;
+  console.log(`\n=== ${withExt ? 'WITH PopShield' : 'BASELINE (no extension) — attacks should succeed'} ===`);
+  const results = res[withExt ? 1 : 0];
+  for (const x of list) { // CASES order
+    const { r, fails } = results.get(x.i);
+    const c = x.c;
+    const detail = !r ? '' : withExt ? `  blocked: [${r.blocked.map((b) => `${b.kind}/${b.reason}`).join(', ')}]` : `  tabs=${r.tabs} url=${r.url}`;
+    console.log(`${fails.length ? 'FAIL' : 'pass'}  ${x.name}${detail}${c.note && withExt ? `\n      note: ${c.note}` : ''}`);
+    for (const f of fails) console.log('      - ' + f);
+    if (fails.length) failed++;
+  }
+}
+console.log(`\n${total - failed}/${total} checks passed (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 process.exit(failed ? 1 : 0);

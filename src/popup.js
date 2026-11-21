@@ -22,6 +22,7 @@ const REASONS = {
   'ad-layer': 'click landed on an ad layer stacked over the page',
   'ad-box-frame': 'link inside an ad box pinned over the page',
   'tab-under': 'opened this page again and tried to turn this tab into an ad',
+  'popup-hijack': 'a popup was sent to another site before you used it',
 };
 
 const $ = (s) => document.querySelector(s);
@@ -50,7 +51,48 @@ function openIssue(template, fields) {
   chrome.tabs.create({ url });
 }
 
+// ---- lifetime stats (stored only on this device) + user-initiated sharing
+const nf = new Intl.NumberFormat();
+async function renderStats() {
+  const { stats } = await chrome.storage.local.get({ stats: null });
+  const st = stats || { total: 0, since: Date.now(), days: {} };
+  $('#total').textContent = nf.format(st.total || 0);
+  $('#total-label').textContent = (st.total === 1 ? 'popup' : 'popups') + ' & redirects blocked';
+  const today = new Date().toLocaleDateString('en-CA');
+  const todayN = (st.days || {})[today] || 0;
+  const sinceStr = new Date(st.since || Date.now()).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  $('#since').textContent = `since ${sinceStr} · ${nf.format(todayN)} today`;
+  // 14-day sparkline
+  const spark = $('#spark');
+  spark.textContent = '';
+  const vals = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    vals.push([d.toLocaleDateString('en-CA'), (st.days || {})[d.toLocaleDateString('en-CA')] || 0]);
+  }
+  const max = Math.max(1, ...vals.map((v) => v[1]));
+  for (const [day, n] of vals) {
+    const bar = document.createElement('i');
+    bar.style.height = Math.max(4, Math.round((n / max) * 100)) + '%';
+    bar.title = `${day}: ${n}`;
+    if (day === today) bar.className = 'today';
+    spark.append(bar);
+  }
+  return st;
+}
+function setupStats() {
+  $('#reset-stats').onclick = async (e) => {
+    e.preventDefault();
+    if (!confirm('Reset the lifetime counter on this device?')) return;
+    await chrome.storage.local.set({ stats: { total: 0, since: Date.now(), days: {}, kinds: {} } });
+    renderStats();
+  };
+  chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.stats) renderStats(); });
+}
+
 async function main() {
+  renderStats();
+  setupStats();
   // ?tab=<id> lets the popup be opened as a normal page (used by the UI test).
   const forced = Number(new URLSearchParams(location.search).get('tab'));
   const [tab] = forced ? [await chrome.tabs.get(forced)] : await chrome.tabs.query({ active: true, currentWindow: true });
@@ -102,10 +144,10 @@ async function main() {
       info.className = 'info';
       const k = document.createElement('div');
       k.className = 'kind';
-      k.textContent = KINDS[item.kind] || item.kind;
+      k.textContent = KINDS[item.kind] || 'Blocked';
       const r = document.createElement('div');
       r.className = 'reason';
-      r.textContent = REASONS[item.reason] || item.reason || '';
+      r.textContent = REASONS[item.reason] || '';
       const u = document.createElement('div');
       u.className = 'url';
       u.textContent = item.url || (item.source ? 'from frame ' + item.source : '');

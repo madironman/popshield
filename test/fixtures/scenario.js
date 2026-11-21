@@ -6,10 +6,10 @@ const t = params.get('t');
 const $ = (s) => document.querySelector(s);
 const ui = $('#ui');
 
-function el(html) { const d = document.createElement('div'); d.innerHTML = html.trim(); const n = d.firstChild; ui.append(n); return n; }
-function playerControls() {
+function el(html, parent = ui) { const d = document.createElement('div'); d.innerHTML = html.trim(); const n = d.firstChild; parent.append(n); return n; }
+function playerControls(parent = ui) {
   // A fake video player with controls, like the one on streaming sites.
-  const p = el('<div id="player" style="width:640px;height:300px;background:#000;position:relative"><button id="play" style="position:absolute;left:10px;bottom:10px">Play</button></div>');
+  const p = el('<div id="player" style="width:640px;height:300px;background:#000;position:relative"><button id="play" style="position:absolute;left:10px;bottom:10px">Play</button></div>', parent);
   $('#play').addEventListener('click', () => { $('#play').textContent = 'Pause'; document.body.dataset.played = '1'; });
   return p;
 }
@@ -143,9 +143,9 @@ const S = {
     el(`<form action="${AD}" method="get" target="_blank"><input id="q" name="q" value="hello"><button id="go">Search</button></form>`);
   },
   'backstop'() { playerControls(); }, // the test opens a tab through an unhooked window.open (CDP isolated world)
-  'legit-async-open'() { // element handler opens after an await (checkout-style)
+  'legit-async-open'() { // element handler opens a same-site page after an await (checkout-style)
     el('<button id="async">Checkout</button>');
-    $('#async').addEventListener('click', async () => { await new Promise((r) => setTimeout(r, 30)); window.open(AD + '?async'); });
+    $('#async').addEventListener('click', async () => { await new Promise((r) => setTimeout(r, 30)); window.open('/other.html?async'); });
   },
 };
 
@@ -171,7 +171,9 @@ function fakeReact17(root, btn, onClick) {
 // jQuery: $(document).on('click', '.share-btn', handler)
 function fakeJQueryOn(selector, handler) {
   const handleObj = { selector, handler, type: 'click' };
-  window.jQuery = { _data: (el, key) => (el === document && key === 'events' ? { click: [handleObj] } : undefined) };
+  // Shaped like real jQuery (PopShield checks fn.jquery and expando).
+  window.jQuery = { fn: { jquery: '3.7.1' }, expando: 'jQuery3710' + Math.random().toString().slice(2),
+    _data: (el, key) => (el === document && key === 'events' ? { click: [handleObj] } : undefined) };
   document.addEventListener('click', (e) => {
     const m = e.target.closest(handleObj.selector);
     if (m) handleObj.handler.call(m, e); // jQuery reads handleObj.handler at dispatch time
@@ -180,8 +182,8 @@ function fakeJQueryOn(selector, handler) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 Object.assign(S, {
   'legit-react16'() { el('<button id="btn">Share (React 16)</button>'); fakeReact16($('#btn'), () => window.open(AD + '?react16')); },
-  'legit-react16-async'() { el('<button id="btn">Pay (React 16)</button>'); fakeReact16($('#btn'), async () => { await sleep(30); window.open(AD + '?react16async'); }); },
-  'legit-react17-async'() { const root = el('<div id="root"><button id="btn">Pay (React 18)</button></div>'); fakeReact17(root, $('#btn'), async () => { await sleep(30); window.open(AD + '?react17async'); }); },
+  'legit-react16-async'() { el('<button id="btn">Pay (React 16)</button>'); fakeReact16($('#btn'), async () => { await sleep(30); window.open('/other.html?react16async'); }); },
+  'legit-react17-async'() { const root = el('<div id="root"><button id="btn">Pay (React 18)</button></div>'); fakeReact17(root, $('#btn'), async () => { await sleep(30); window.open('/other.html?react17async'); }); },
   'legit-jquery-delegated'() { el('<button id="btn" class="share-btn">Share (jQuery)</button>'); fakeJQueryOn('.share-btn', () => window.open(AD + '?jquery')); },
   'jquery-star-popunder'() { // ad using a catch-all delegated selector must NOT get the framework pass
     playerControls(); fakeJQueryOn('*', () => window.open(AD + '?jqstar'));
@@ -245,6 +247,32 @@ Object.assign(S, {
   'retry-loop-popunder'() { // ad script that retries window.open hundreds of times once blocked
     playerControls();
     document.addEventListener('click', () => { for (let i = 0; i < 300; i++) window.open('', '_blank'); window.open(AD + '?loop'); });
+  },
+});
+
+Object.assign(S, {
+  'async-cross-site-element'() { // element handler that opens an ad site after an await
+    el('<button id="btn">Download</button>');
+    $('#btn').addEventListener('click', async () => { await sleep(30); window.open(AD + '?asyncx'); });
+  },
+  'wrapper-div-popunder'() { // popunder hook on a full-page wrapper div instead of document
+    const app = el('<div id="app" style="min-height:100vh"></div>', document.body);
+    app.append(ui); // everything (player included) lives inside the wrapper
+    playerControls();
+    app.addEventListener('click', () => window.open(AD + '?wrapper'));
+  },
+  'legit-react17-root'() { // React 17+ root container covering the viewport, button opens synchronously
+    const root = el('<div id="root" style="min-height:100vh"><button id="btn">Open docs (React 17)</button></div>');
+    fakeReact17(root, $('#btn'), () => window.open(AD + '?react17root'));
+  },
+  'svg-link-dispatch'() { // hidden SVG <a target=_blank> clicked via a synthetic event
+    playerControls();
+    const svg = el(`<svg width="10" height="10"><a href="${AD}?svg" target="_blank"><text y="9">x</text></a></svg>`);
+    const svgA = svg.querySelector('a');
+    document.addEventListener('click', (e) => {
+      if (svgA.contains(e.target)) return; // don't re-handle our own synthetic click
+      svgA.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
   },
 });
 
