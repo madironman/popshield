@@ -1,0 +1,100 @@
+name: Ad got through
+description: A site still opened an ad tab, popup, popunder or redirect with PopShield on.
+title: "[Ad got through]: "
+labels: ["ad-got-through", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Each report helps PopShield learn a new trick ad scripts use.
+        Please don't include personal information (logged-in URLs, tokens, account names).
+  - type: input
+    id: url
+    attributes:
+      label: Site URL
+      description: The page where the ad got through. A page that reproduces it without logging in is best.
+      placeholder: https://example.com/watch/123
+    validations:
+      required: true
+  - type: dropdown
+    id: page-type
+    attributes:
+      label: Page type
+      options:
+        - Video / streaming player
+        - File download / file host
+        - Link shortener
+        - Article / blog
+        - Image gallery
+        - Search results
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: PopShield mode on this site
+      description: Shown in the toolbar popup.
+      options:
+        - Smart
+        - Strict
+        - "Off"
+    validations:
+      required: true
+  - type: checkboxes
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Select everything you saw.
+      options:
+        - label: A new tab opened
+        - label: A popup window opened
+        - label: A tab opened behind the current one (popunder)
+        - label: The current tab was redirected to an ad
+        - label: Chrome showed a "Leave site?" prompt
+        - label: Something else (describe below)
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you click, and where? (e.g. "clicked Play on the video player", "clicked anywhere on the page")
+      placeholder: |
+        1. Open the URL
+        2. Click the Play button on the video
+        3. A new tab opened to ...
+    validations:
+      required: true
+  - type: input
+    id: opened-url
+    attributes:
+      label: Ad URL that opened (if known)
+      placeholder: https://ad-network.example/...
+  - type: input
+    id: chrome-version
+    attributes:
+      label: Chrome version
+      description: From chrome://version (e.g. 131.0.6778.86)
+    validations:
+      required: true
+  - type: input
+    id: popshield-version
+    attributes:
+      label: PopShield version
+      description: From chrome://extensions
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: blocked-log
+    attributes:
+      label: PopShield blocked log
+      description: |
+        Open the PopShield toolbar popup on that tab and attach a screenshot of the blocked list (drag the image here).
+        Write "empty" if nothing was listed.
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Other extensions installed (especially other ad blockers), output of `npm run test:live -- <url>` if you ran it, etc.

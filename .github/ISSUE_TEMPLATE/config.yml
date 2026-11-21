@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/madironman/popshield/security/advisories/new
+    about: Please report vulnerabilities privately. Do not open a public issue. See SECURITY.md.
+  - name: Security policy
+    url: https://github.com/madironman/popshield/blob/main/SECURITY.md
+    about: What counts as a security issue and how it is handled.

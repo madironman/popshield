@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 340" width="960" height="340" role="img" aria-labelledby="t d">
+  <title id="t">PopShield</title>
+  <desc id="d">Animated banner: clicks on a video player try to open ad windows, and PopShield blocks each one while the video keeps playing.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1d3f"/>
+      <stop offset=".55" stop-color="#0f2f6b"/>
+      <stop offset="1" stop-color="#1a4fb0"/>
+    </linearGradient>
+    <radialGradient id="halo" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#8ab4f8" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#8ab4f8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hit" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#8ab4f8" stop-opacity=".0"/>
+      <stop offset=".7" stop-color="#8ab4f8" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#8ab4f8" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.1" fill="#ffffff" opacity=".07"/>
+    </pattern>
+    <clipPath id="card"><rect width="960" height="340" rx="22"/></clipPath>
+  </defs>
+  <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif}.mono{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}.anim{animation-duration:6s;animation-iteration-count:infinite;animation-timing-function:ease-out;animation-fill-mode:both}.ad,.x,.ripple,.cnt,.wall,.pause,.play{transform-box:fill-box;transform-origin:center}@keyframes ad0{0%{opacity:0;transform:translate(0px,0px) scale(.15)}10%{opacity:0;transform:translate(0px,0px) scale(.15)}12%{opacity:1}21%{opacity:1;transform:translate(-204.0px,-68.0px) scale(1)}22.5%{transform:translate(-195.8px,-65.3px) scale(.96)}24%{transform:translate(-204.0px,-68.0px) scale(1)}30%{opacity:1;transform:translate(-204.0px,-62.0px) scale(.94)}35%{opacity:0;transform:translate(-204.0px,-42.0px) scale(.8)}100%{opacity:0;transform:translate(-204.0px,-42.0px) scale(.8)}}@keyframes x0{0%{opacity:0} 20.8%{opacity:0} 22%{opacity:1} 32%{opacity:1} 33.2%{opacity:0} 100%{opacity:0}}@keyframes w0{0%{opacity:0} 18%{opacity:0} 21%{opacity:0.9} 24%{opacity:0.9} 27%{opacity:0} 100%{opacity:0}}@keyframes rp0{0%{opacity:0;transform:scale(.2)}8.5%{opacity:0;transform:scale(.2)}9%{opacity:.9;transform:scale(.3)}16%{opacity:0;transform:scale(1.6)}100%{opacity:0}}@keyframes ad1{0%{opacity:0;transform:translate(0px,0px) scale(.15)}40%{opacity:0;transform:translate(0px,0px) scale(.15)}42%{opacity:1}51%{opacity:1;transform:translate(-44.0px,-178.0px) scale(1)}52.5%{transform:translate(-42.2px,-170.9px) scale(.96)}54%{transform:translate(-44.0px,-178.0px) scale(1)}60%{opacity:1;transform:translate(-44.0px,-172.0px) scale(.94)}65%{opacity:0;transform:translate(-44.0px,-152.0px) scale(.8)}100%{opacity:0;transform:translate(-44.0px,-152.0px) scale(.8)}}@keyframes x1{0%{opacity:0} 50.8%{opacity:0} 52%{opacity:1} 62%{opacity:1} 63.2%{opacity:0} 100%{opacity:0}}@keyframes w1{0%{opacity:0} 48%{opacity:0} 51%{opacity:0.9} 54%{opacity:0.9} 57%{opacity:0} 100%{opacity:0}}@keyframes rp1{0%{opacity:0;transform:scale(.2)}38.5%{opacity:0;transform:scale(.2)}39%{opacity:.9;transform:scale(.3)}46%{opacity:0;transform:scale(1.6)}100%{opacity:0}}@keyframes ad2{0%{opacity:0;transform:translate(0px,0px) scale(.15)}70%{opacity:0;transform:translate(0px,0px) scale(.15)}72%{opacity:1}81%{opacity:1;transform:translate(204.0px,-90.0px) scale(1)}82.5%{transform:translate(195.8px,-86.4px) scale(.96)}84%{transform:translate(204.0px,-90.0px) scale(1)}90%{opacity:1;transform:translate(204.0px,-84.0px) scale(.94)}95%{opacity:0;transform:translate(204.0px,-64.0px) scale(.8)}100%{opacity:0;transform:translate(204.0px,-64.0px) scale(.8)}}@keyframes x2{0%{opacity:0} 80.8%{opacity:0} 82%{opacity:1} 92%{opacity:1} 93.2%{opacity:0} 100%{opacity:0}}@keyframes w2{0%{opacity:0} 78%{opacity:0} 81%{opacity:0.9} 84%{opacity:0.9} 87%{opacity:0} 100%{opacity:0}}@keyframes rp2{0%{opacity:0;transform:scale(.2)}68.5%{opacity:0;transform:scale(.2)}69%{opacity:.9;transform:scale(.3)}76%{opacity:0;transform:scale(1.6)}100%{opacity:0}}@keyframes c0{0%{opacity:0} 21.5%{opacity:0} 22%{opacity:1} 51.5%{opacity:1} 52%{opacity:0} 100%{opacity:0}}@keyframes c1{0%{opacity:0} 51.5%{opacity:0} 52%{opacity:1} 81.5%{opacity:1} 82%{opacity:0} 100%{opacity:0}}@keyframes c2{0%{opacity:0} 81.5%{opacity:0} 82%{opacity:1} 97%{opacity:1} 97.5%{opacity:0} 100%{opacity:0}}@keyframes badge{0%,21%{transform:scale(0)}22%{transform:scale(1.25)}24%,97%{transform:scale(1)}99%,100%{transform:scale(0)}}@keyframes pause{0%{opacity:0} 9.4%{opacity:0} 10%{opacity:1} 97%{opacity:1} 97.6%{opacity:0} 100%{opacity:0}}@keyframes play{0%{opacity:0} 0.1%{opacity:1} 9.4%{opacity:1} 10%{opacity:0} 100%{opacity:0}}@keyframes play0{0%,9.4%{opacity:1}10%,97%{opacity:0}98%,100%{opacity:1}}@keyframes prog{0%,10%{transform:scaleX(0)}97%{transform:scaleX(1)}100%{transform:scaleX(0)}}@keyframes cur{0%{transform:translate(0.0px,0.0px)} 6%{transform:translate(-30.0px,-40.0px)} 9%{transform:translate(-30.0px,-40.0px)} 10%{transform:translate(-30.0px,-40.0px)} 13%{transform:translate(-30.0px,-40.0px)} 34%{transform:translate(-146.0px,4.0px)} 39%{transform:translate(-146.0px,4.0px)} 43%{transform:translate(-146.0px,4.0px)} 64%{transform:translate(60.0px,-60.0px)} 69%{transform:translate(60.0px,-60.0px)} 73%{transform:translate(60.0px,-60.0px)} 96%{transform:translate(0.0px,0.0px)} 100%{transform:translate(0.0px,0.0px)}}@keyframes press{0%,9%,11%,39%,41%,69%,71%,100%{transform:scale(1)}10%,40%,70%{transform:scale(.82)}}@keyframes glow{0%,100%{opacity:.55}50%{opacity:.9}}@media (prefers-reduced-motion: reduce){.anim{animation:none!important}.rm-hide{opacity:0}}</style>
+
+  <g clip-path="url(#card)">
+    <rect width="960" height="340" fill="url(#bg)"/>
+    <rect width="960" height="340" fill="url(#dots)"/>
+    <circle cx="704.0" cy="188.0" r="250" fill="url(#halo)"/>
+  </g>
+
+  <!-- left: name + one-liner -->
+  <g transform="translate(56 62) scale(0.64)"><path d="M10 6 H90 V62 L50 96 L10 62 Z" fill="#1a73e8"/><path d="M29 47 L44 62 L72 32" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <text x="134" y="106" font-size="46" font-weight="800" fill="#ffffff" letter-spacing="-.5">PopShield</text>
+  <text x="58" y="166" font-size="19" fill="#d2e3fc">Blocks ad popups, popunders, ad tabs</text>
+  <text x="58" y="192" font-size="19" fill="#d2e3fc">and tab-hijack redirects.</text>
+  <text x="58" y="226" font-size="19" font-weight="600" fill="#ffffff">The tabs you open still work.</text>
+  <g font-size="13" font-weight="600">
+    <rect x="58" y="252" width="104" height="28" rx="14" fill="#ffffff" fill-opacity=".1" stroke="#8ab4f8" stroke-opacity=".5"/>
+    <text x="110" y="270.5" fill="#d2e3fc" text-anchor="middle">Manifest V3</text>
+    <rect x="170" y="252" width="110" height="28" rx="14" fill="#ffffff" fill-opacity=".1" stroke="#8ab4f8" stroke-opacity=".5"/>
+    <text x="225" y="270.5" fill="#d2e3fc" text-anchor="middle">No telemetry</text>
+    <rect x="288" y="252" width="104" height="28" rx="14" fill="#ffffff" fill-opacity=".1" stroke="#8ab4f8" stroke-opacity=".5"/>
+    <text x="340" y="270.5" fill="#d2e3fc" text-anchor="middle">Open source</text>
+  </g>
+
+  <!-- shield boundary around the browser -->
+  <rect x="500" y="40" width="408" height="280" rx="26" fill="none" stroke="#8ab4f8" stroke-width="1.5" stroke-dasharray="5 7" class="anim" style="animation-name:glow;animation-timing-function:ease-in-out"/>
+  <circle class="wall anim rm-hide" style="animation-name:w0" cx="500.0" cy="150.0" r="46" fill="url(#hit)"/><circle class="wall anim rm-hide" style="animation-name:w1" cx="660.0" cy="40.0" r="46" fill="url(#hit)"/><circle class="wall anim rm-hide" style="animation-name:w2" cx="908.0" cy="128.0" r="46" fill="url(#hit)"/>
+
+  <!-- browser -->
+  <g>
+    <rect x="552" y="86" width="304" height="204" rx="12" fill="#dee1e6"/>
+    <path d="M564 116 v-16 a6 6 0 0 1 6 -6 h120 a6 6 0 0 1 6 6 v16 z" fill="#ffffff"/>
+    <circle cx="578" cy="105" r="5" fill="#1a73e8"/>
+    <text x="589" y="109" font-size="11" fill="#3c4043">stream.example</text>
+    <rect x="552" y="116" width="304" height="174" fill="#ffffff"/>
+    <rect x="552" y="278" width="304" height="12" rx="12" fill="#ffffff"/>
+    <rect x="592" y="122" width="214" height="22" rx="11" fill="#f1f3f4"/>
+    <text x="606" y="137" font-size="11" fill="#5f6368" class="mono">stream.example/watch</text>
+    <path d="M566 133 h14 m-6 -6 l6 6 l-6 6" fill="none" stroke="#9aa0a6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" transform="rotate(180 573 133)"/>
+    <g transform="translate(817 124) scale(0.18)"><path d="M10 6 H90 V62 L50 96 L10 62 Z" fill="#1a73e8"/><path d="M29 47 L44 62 L72 32" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <g class="anim" style="animation-name:badge;transform-box:fill-box;transform-origin:center">
+      <rect x="828" y="118" width="16" height="13" rx="6.5" fill="#d93025"/>
+      <g font-size="9.5" font-weight="700" fill="#fff" text-anchor="middle">
+        <text class="cnt anim" style="animation-name:c0" x="836" y="128">1</text>
+        <text class="cnt anim" style="animation-name:c1" x="836" y="128">2</text>
+        <text class="cnt anim" style="animation-name:c2" x="836" y="128">3</text>
+      </g>
+    </g>
+    <!-- player -->
+    <rect x="566" y="160" width="276" height="116" rx="6" fill="#111418"/>
+    <rect x="566" y="160" width="276" height="116" rx="6" fill="url(#halo)" opacity=".25"/>
+    <g class="play anim" style="animation-name:play0">
+      <circle cx="704.0" cy="218.0" r="22" fill="#ffffff" fill-opacity=".14" stroke="#ffffff" stroke-opacity=".6"/>
+      <path d="M698.0 208.0 L715.0 218.0 L698.0 228.0 Z" fill="#ffffff"/>
+    </g>
+    <rect x="606" y="260" width="220" height="4" rx="2" fill="#ffffff" fill-opacity=".25"/>
+    <rect x="606" y="260" width="220" height="4" rx="2" fill="#4285f4" class="anim" style="animation-name:prog;animation-timing-function:linear;transform-origin:606px 262px"/>
+    <path class="anim" style="animation-name:play0" d="M584 256 l9 6 l-9 6 z" fill="#ffffff" opacity=".85"/>
+    <g class="anim" style="animation-name:pause" fill="#ffffff" opacity=".85"><rect x="583" y="256" width="3.5" height="12" rx="1"/><rect x="590" y="256" width="3.5" height="12" rx="1"/></g>
+  </g>
+  <circle class="ripple anim rm-hide" style="animation-name:rp0" cx="704.0" cy="218.0" r="16" fill="none" stroke="#8ab4f8" stroke-width="2.5"/><circle class="ripple anim rm-hide" style="animation-name:rp1" cx="588.0" cy="262.0" r="16" fill="none" stroke="#8ab4f8" stroke-width="2.5"/><circle class="ripple anim rm-hide" style="animation-name:rp2" cx="794.0" cy="198.0" r="16" fill="none" stroke="#8ab4f8" stroke-width="2.5"/>
+  <!-- cursor -->
+  <g class="anim" style="animation-name:cur;animation-timing-function:ease-in-out">
+    <g class="anim" style="animation-name:press;transform-box:fill-box;transform-origin:top left">
+      <path transform="translate(734.0 258.0)" d="M0 0 L0 19 L4.6 14.8 L7.8 21.8 L11 20.4 L7.8 13.6 L14 13.4 Z" fill="#ffffff" stroke="#202124" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+  </g>
+  
+  <g class="ad anim rm-hide" style="animation-name:ad0">
+    <g transform="translate(662.0 191.0)">
+      <rect width="84" height="54" rx="7" fill="#ffffff" stroke="#f28b82" stroke-width="1.5"/>
+      <path d="M0 7 a7 7 0 0 1 7 -7 h70 a7 7 0 0 1 7 7 v9 h-84 z" fill="#ea4335"/>
+      <circle cx="8" cy="8" r="2" fill="#fff" opacity=".8"/><circle cx="15" cy="8" r="2" fill="#fff" opacity=".8"/>
+      <text x="76" y="11.5" font-size="8" font-weight="700" fill="#fff" text-anchor="end" letter-spacing=".5">AD</text>
+      <rect x="9" y="23" width="66" height="7" rx="3.5" fill="#fbbc04"/>
+      <rect x="9" y="35" width="50" height="5" rx="2.5" fill="#dadce0"/>
+      <rect x="9" y="44" width="38" height="5" rx="2.5" fill="#dadce0"/>
+    </g>
+    <g class="x anim" style="animation-name:x0">
+      <circle cx="704.0" cy="218.0" r="17" fill="#d93025" stroke="#ffffff" stroke-width="2.5"/>
+      <path d="M698.0 212.0 L710.0 224.0 M710.0 212.0 L698.0 224.0" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+    </g>
+  </g>
+  <g class="ad anim rm-hide" style="animation-name:ad1">
+    <g transform="translate(662.0 191.0)">
+      <rect width="84" height="54" rx="7" fill="#ffffff" stroke="#f28b82" stroke-width="1.5"/>
+      <path d="M0 7 a7 7 0 0 1 7 -7 h70 a7 7 0 0 1 7 7 v9 h-84 z" fill="#ea4335"/>
+      <circle cx="8" cy="8" r="2" fill="#fff" opacity=".8"/><circle cx="15" cy="8" r="2" fill="#fff" opacity=".8"/>
+      <text x="76" y="11.5" font-size="8" font-weight="700" fill="#fff" text-anchor="end" letter-spacing=".5">AD</text>
+      <rect x="9" y="23" width="66" height="7" rx="3.5" fill="#fbbc04"/>
+      <rect x="9" y="35" width="50" height="5" rx="2.5" fill="#dadce0"/>
+      <rect x="9" y="44" width="38" height="5" rx="2.5" fill="#dadce0"/>
+    </g>
+    <g class="x anim" style="animation-name:x1">
+      <circle cx="704.0" cy="218.0" r="17" fill="#d93025" stroke="#ffffff" stroke-width="2.5"/>
+      <path d="M698.0 212.0 L710.0 224.0 M710.0 212.0 L698.0 224.0" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+    </g>
+  </g>
+  <g class="ad anim rm-hide" style="animation-name:ad2">
+    <g transform="translate(662.0 191.0)">
+      <rect width="84" height="54" rx="7" fill="#ffffff" stroke="#f28b82" stroke-width="1.5"/>
+      <path d="M0 7 a7 7 0 0 1 7 -7 h70 a7 7 0 0 1 7 7 v9 h-84 z" fill="#ea4335"/>
+      <circle cx="8" cy="8" r="2" fill="#fff" opacity=".8"/><circle cx="15" cy="8" r="2" fill="#fff" opacity=".8"/>
+      <text x="76" y="11.5" font-size="8" font-weight="700" fill="#fff" text-anchor="end" letter-spacing=".5">AD</text>
+      <rect x="9" y="23" width="66" height="7" rx="3.5" fill="#fbbc04"/>
+      <rect x="9" y="35" width="50" height="5" rx="2.5" fill="#dadce0"/>
+      <rect x="9" y="44" width="38" height="5" rx="2.5" fill="#dadce0"/>
+    </g>
+    <g class="x anim" style="animation-name:x2">
+      <circle cx="704.0" cy="218.0" r="17" fill="#d93025" stroke="#ffffff" stroke-width="2.5"/>
+      <path d="M698.0 212.0 L710.0 224.0 M710.0 212.0 L698.0 224.0" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

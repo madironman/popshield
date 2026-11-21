@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PopShield</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d8dee4; --card: #f6f8fa;
+    --accent: #1a73e8; --accent-fg: #fff; --danger: #d93025;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1f2125; --fg: #e8eaed; --muted: #9aa0a6; --line: #3c4043; --card: #2a2c31;
+            --accent: #8ab4f8; --accent-fg: #202124; --danger: #f28b82; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 360px; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  header img { width: 22px; height: 22px; }
+  header img { width: 28px; height: 28px; }
+  header .brand { flex: 1; }
+  header h1 { font-size: 15px; margin: 0; }
+  header .tag { color: var(--muted); font-size: 11px; }
+  #count { font-weight: 600; color: var(--danger); }
+  section { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  #site { font-weight: 600; word-break: break-all; margin-bottom: 8px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; padding: 7px 0; border: 0; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; min-height: 2.8em; }
+  ul { list-style: none; margin: 0; padding: 0; max-height: 230px; overflow-y: auto; }
+  li { display: flex; gap: 8px; align-items: flex-start; padding: 7px 0; border-top: 1px solid var(--line); }
+  li:first-child { border-top: 0; }
+  li .info { flex: 1; min-width: 0; }
+  li .kind { font-weight: 600; }
+  li .reason { color: var(--muted); }
+  li .url { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  li button { border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+  .empty { color: var(--muted); }
+  footer { display: flex; align-items: center; gap: 8px; padding: 10px 14px; color: var(--muted); font-size: 12px; }
+  footer select { font: inherit; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
+  .disabled { padding: 16px 14px; color: var(--muted); }
+  .report { display: flex; gap: 8px; flex-wrap: wrap; }
+  .report button { flex: 1 1 auto; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+  .report button:hover { border-color: var(--accent); }
+  .fineprint { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  footer a { color: var(--accent); margin-left: auto; text-decoration: none; }
+</style>
+</head>
+<body>
+  <header>
+    <img src="../icons/32.png" alt="">
+    <div class="brand">
+      <h1>PopShield</h1>
+    </div>
+    <span id="count"></span>
+  </header>
+  <div id="main">
+    <section>
+      <div class="label">Protection on</div>
+      <div id="site"></div>
+      <div class="seg" role="group" aria-label="Mode for this site">
+        <button data-mode="smart">Smart</button>
+        <button data-mode="strict">Strict</button>
+        <button data-mode="off">Off</button>
+      </div>
+      <div class="hint" id="hint"></div>
+    </section>
+    <section>
+      <div class="label">Blocked on this page</div>
+      <ul id="log"></ul>
+    </section>
+    <section>
+      <div class="label">Something wrong on this site?</div>
+      <div class="report">
+        <button id="report-ad" title="Ads, popups or redirects still get through on this site">Report ads that got through</button>
+        <button id="report-fp" title="Something you clicked was blocked by mistake">Report something blocked by mistake</button>
+      </div>
+      <div class="fineprint">Opens a pre-filled public GitHub issue that you can review and edit before sending. PopShield itself never sends anything.</div>
+    </section>
+  </div>
+  <footer>
+    Default for other sites
+    <select id="default">
+      <option value="smart">Smart</option>
+      <option value="strict">Strict</option>
+      <option value="off">Off</option>
+    </select>
+    <a id="feedback" href="#" title="Ideas, questions and feedback">Feedback</a>
+  </footer>
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+name: Release
+
+# Runs when a version tag (vX.Y.Z) is pushed. Checks that the tag matches the
+# version in manifest.json / package.json / package-lock.json and CHANGELOG.md,
+# runs the full test suite, builds the Chrome Web Store zip and publishes a
+# GitHub Release with the zip, its SHA-256 checksum and the CHANGELOG notes.
+# Uploading to the Chrome Web Store stays a manual step (see docs/RELEASING.md).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so we can check that the tag is on main.
+          fetch-depth: 0
+
+      - name: Tag must point to a commit on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on main. Releases are cut from main only."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check version, tag and CHANGELOG agree
+        run: node scripts/check-version.mjs "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build extension zip
+        run: node scripts/package.mjs
+
+      - name: Write SHA-256 checksum
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cd dist
+          test -f "popshield-$version.zip"
+          sha256sum "popshield-$version.zip" > "popshield-$version.zip.sha256"
+          cat "popshield-$version.zip.sha256"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/popshield-$version.zip" \
+            "dist/popshield-$version.zip.sha256" \
+            --verify-tag \
+            --title "PopShield $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
