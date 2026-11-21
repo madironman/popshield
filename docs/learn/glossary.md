@@ -1,0 +1,96 @@
+# Glossary
+
+[Index](../LEARN.md) · [Part 0](00-basics.md) · [Part I](01-attacks.md) · [Part II](02-extensions.md) · [Part III](03-popshield.md) · [Part IV](04-decisions.md) · [Part V](05-contributing.md) · **Glossary**
+
+Every term used in the guide, in alphabetical order, with a short plain
+definition. The chapter where it's explained properly is linked when there is
+one.
+
+- <a id="activating-event"></a>**Activating event.** A kind of event that counts as a finished user action in PopShield: click, auxclick (middle click), dblclick, mouseup, pointerup, touchend, keydown, keyup. A `mousedown` or `pointerdown` doesn't count. [Part III](03-popshield.md#1-the-bouncers-question)
+- <a id="ad-box-frame"></a>**Ad box frame.** A blank frame built by a script and pinned over the page at the top z-index, filled with a decoy link. [Part III](03-popshield.md#telling-real-link-clicks-from-decoys)
+- <a id="ad-layer"></a>**Ad layer.** A visible element pinned at (near) the maximum z-index over at least a quarter of the view, clicked on non-interactive content. [Part III](03-popshield.md#visible-ad-layers)
+- <a id="allow-token"></a>**Allow token (ticket).** A short-lived permission for one new tab, issued only by the bridge, naming the site the tab may open on, held by the service worker. [Part III](03-popshield.md#5-tickets-for-new-tabs)
+- <a id="async-await"></a>**`async` / `await`.** JavaScript words that let a function pause while waiting for something slow and continue later. [Part 0](00-basics.md#5-reading-just-enough-javascript)
+- <a id="async-ok"></a>**`ASYNC_OK`.** PopShield's built-in list of sign-in and payment provider sites that may be opened or redirected to after a wait. In `src/bridge.js`.
+- <a id="attestation"></a>**Attestation (build provenance).** A signed record saying which workflow, from which commit, produced a release file, so anyone can check where it came from. [Part IV](04-decisions.md#17-protecting-the-build-itself)
+- <a id="attribute"></a>**Attribute.** Extra information inside an HTML tag, such as `href="..."` or `target="_blank"`. [Part 0](00-basics.md#1-what-a-web-page-is-made-of)
+- <a id="backstop"></a>**Backstop.** The service worker's safety net: it closes any new tab that has no fitting ticket. [Part III](03-popshield.md#5-tickets-for-new-tabs)
+- <a id="baseline"></a>**Baseline.** The test run without PopShield, which must show the attack working. [Part V](05-contributing.md#2-running-the-tests)
+- <a id="beforeunload"></a>**`beforeunload`.** An event a page gets just before it is left; cancelling it makes Chrome ask "Leave site?". [Part III](03-popshield.md#hijacks-from-the-video-player)
+- <a id="bridge"></a>**Bridge.** `src/bridge.js`, PopShield's script in the isolated world. It makes every decision, issues tickets and runs the redirect guards. [Part III](03-popshield.md#4-asking-through-the-wall)
+- <a id="browser"></a>**Browser.** The program that fetches and shows web pages: Chrome, Edge, Brave and so on. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
+- <a id="bubble"></a>**Bubble phase.** The part of an event's trip where it travels back up from the clicked element to `window`. See *event phase*.
+- <a id="capture"></a>**Capture phase.** The part of an event's trip where it travels down from `window` to the clicked element. See *event phase*.
+- <a id="chromium"></a>**Chromium.** The open-source browser project that Chrome, Edge, Brave and Opera are built from. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
+- <a id="composedpath"></a>**`composedPath()`.** A method of an event that lists every element on its route, starting with the one really clicked.
+- <a id="content-script"></a>**Content script.** Extension code that the browser runs inside web pages. [Part II](02-extensions.md#3-where-an-extensions-code-runs)
+- <a id="css"></a>**CSS.** The language that describes how a page looks: colours, sizes, positions. [Part 0](00-basics.md#1-what-a-web-page-is-made-of)
+- <a id="currenttarget"></a>**`currentTarget`.** The element whose listener is running right now, as an event travels. [Part 0](00-basics.md#6-how-a-click-travels-through-a-page)
+- <a id="custom-event"></a>**Custom event.** An event invented and sent by a script rather than by the browser. PopShield's two scripts talk with them. [Part II](02-extensions.md#4-two-worlds-inside-one-page)
+- <a id="dead-href"></a>**Dead-end link.** A link whose address goes nowhere new: `#...`, empty, `javascript:`, or this same page. Clicking one earns only a "same site only" ticket.
+- <a id="defence-in-depth"></a>**Defence in depth.** Having more than one independent layer of protection, so one failure isn't fatal. [Part IV](04-decisions.md#6-a-safety-net-with-tickets)
+- <a id="document-open"></a>**`document.open()`.** A method that wipes a document so a script can write new contents into it; it also removes all the document's listeners. [Part IV](04-decisions.md#13-surviving-documentopen)
+- <a id="document-start"></a>**`document_start`.** The manifest setting that runs a content script before any of the page's own scripts. [Part II](02-extensions.md#5-getting-there-first)
+- <a id="dom"></a>**DOM.** The tree of elements the browser builds from a page's HTML; what JavaScript actually reads and changes. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
+- <a id="effective-opacity"></a>**Effective opacity.** How visible an element really is: its opacity multiplied by every parent's. [Part III](03-popshield.md#invisible-overlays)
+- <a id="element"></a>**Element.** One piece of a page: a tag and what's inside it, such as a button or a link. [Part 0](00-basics.md#1-what-a-web-page-is-made-of)
+- <a id="event"></a>**Event.** A small object the browser creates when something happens, such as a click. [Part 0](00-basics.md#5-reading-just-enough-javascript)
+- <a id="event-phase"></a>**Event phase.** Where an event is on its trip: capture (down), target, bubble (up), or finished (`eventPhase` 0). [Part 0](00-basics.md#6-how-a-click-travels-through-a-page)
+- <a id="extension"></a>**Extension.** An add-on program installed into the browser, with extra abilities granted by permissions. [Part II](02-extensions.md#1-add-ons-with-special-powers)
+- <a id="extension-popup"></a>**Extension popup.** The small page that appears when you click an extension's toolbar button. Not an ad popup. [Part II](02-extensions.md#3-where-an-extensions-code-runs)
+- <a id="fail-closed"></a>**Fail closed / fail open.** What happens when something goes wrong: fail closed means "say no" (PopShield's hooks and backstop), fail open means "let it through" (PopShield's detectors, so real sites keep working).
+- <a id="framework"></a>**Framework.** A ready-made toolkit for building websites, such as React, Solid or jQuery. [Part III](03-popshield.md#frameworks-that-delegate-clicks)
+- <a id="frame"></a>**Frame (iframe).** A complete page shown inside another page. [Part 0](00-basics.md#3-pages-inside-pages)
+- <a id="hook"></a>**Hook.** PopShield's replacement for a browser tool such as `window.open`, which asks the bridge before calling the real one. [Part III](03-popshield.md#2-following-one-click-from-start-to-finish)
+- <a id="html"></a>**HTML.** The language that describes a page's structure: headings, buttons, links. [Part 0](00-basics.md#1-what-a-web-page-is-made-of)
+- <a id="intent-model"></a>**Intent model.** PopShield's rule: a page may open a tab only while a real click on a specific element is being handled. [Part III](03-popshield.md#1-the-bouncers-question)
+- <a id="isolated-world"></a>**Isolated world.** A content script's private JavaScript world, with its own clean tools and the extension's abilities: the soundproof room. [Part II](02-extensions.md#4-two-worlds-inside-one-page)
+- <a id="istrusted"></a>**`isTrusted`.** `true` only for events that came from a real person's input; scripts can't fake it. [Part 0](00-basics.md#6-how-a-click-travels-through-a-page)
+- <a id="javascript"></a>**JavaScript (JS).** The programming language that makes pages react and change. [Part 0](00-basics.md#5-reading-just-enough-javascript)
+- <a id="json"></a>**JSON.** A simple text format for labelled values in curly braces, used for `manifest.json` and for PopShield's messages.
+- <a id="listener"></a>**Listener.** A function the browser runs when a certain event reaches a certain element. [Part 0](00-basics.md#5-reading-just-enough-javascript)
+- <a id="main-world"></a>**MAIN world.** The page's own JavaScript world, shared with the page's scripts. [Part II](02-extensions.md#4-two-worlds-inside-one-page)
+- <a id="manifest"></a>**Manifest.** `manifest.json`, the file that tells the browser what an extension is and what it needs. [Part II](02-extensions.md#2-popshields-manifest-line-by-line)
+- <a id="manifest-v3"></a>**Manifest V3 (MV3).** The current set of rules for Chrome extensions. [Part II](02-extensions.md#1-add-ons-with-special-powers)
+- <a id="match-origin-as-fallback"></a>**`match_origin_as_fallback`.** The manifest setting that also runs content scripts in blank and script-built frames. [Part II](02-extensions.md#5-getting-there-first)
+- <a id="message"></a>**Message.** A note sent between parts of an extension, for example from the bridge to the service worker. [Part II](02-extensions.md#3-where-an-extensions-code-runs)
+- <a id="method"></a>**Method.** A function stored inside an object, like `window.open`. [Part 0](00-basics.md#5-reading-just-enough-javascript)
+- <a id="mutationobserver"></a>**MutationObserver.** A browser tool that tells a script when the DOM changes. [Part IV](04-decisions.md#13-surviving-documentopen)
+- <a id="navigation-api"></a>**Navigation API.** A browser feature that announces a navigation of the top frame (a `navigate` event) before it happens, and lets a script cancel it. [Part III](03-popshield.md#redirects-of-the-tab-youre-on)
+- <a id="nodejs"></a>**Node.js.** A program that runs JavaScript on your computer, outside a browser. [Part V](05-contributing.md#1-setting-up-your-computer)
+- <a id="nonce"></a>**Nonce (the stamp).** A random secret, used once, that names PopShield's private channel between its two scripts. [Part III](03-popshield.md#4-asking-through-the-wall)
+- <a id="npm"></a>**npm.** Node's package manager: downloads a project's libraries and runs its named commands. [Part V](05-contributing.md#1-setting-up-your-computer)
+- <a id="origin"></a>**Origin.** Scheme + host name + port, e.g. `https://video.example.com`. The browser keeps different origins apart. [Part 0](00-basics.md#4-who-is-allowed-to-touch-what)
+- <a id="overlay"></a>**Overlay.** A pinned, (nearly) invisible element covering much of the page, so your click lands on it instead of what you see. [Part I](01-attacks.md#the-invisible-overlay)
+- <a id="page-wide-listener"></a>**Page-wide listener.** A listener that hears every click: on `window`, a document, a shadow root, `<html>`, `<body>`, or an ordinary element covering at least half the view. [Part III](03-popshield.md#page-wide-hooks-including-big-wrappers)
+- <a id="permission"></a>**Permission.** An ability an extension must request up front, such as `storage`. [Part II](02-extensions.md#6-what-popshield-is-allowed-to-do)
+- <a id="persist-credentials"></a>**`persist-credentials: false`.** A setting that stops the checkout step of a GitHub workflow from leaving its access token on disk. [Part IV](04-decisions.md#17-protecting-the-build-itself)
+- <a id="playwright"></a>**Playwright.** A library that drives a real browser from a program; PopShield's tests use it. [Part V](05-contributing.md#1-setting-up-your-computer)
+- <a id="poisoned-built-in"></a>**Poisoned built-in.** A browser tool (such as `JSON.parse`) that a page has replaced with a fake in its own world. [Part IV](04-decisions.md#7-moving-the-decision-out-of-the-pages-reach)
+- <a id="popunder"></a>**Popunder.** An ad tab or window opened behind the one you're using. [Part I](01-attacks.md#the-page-wide-click-hook-popunder)
+- <a id="popup"></a>**Popup.** A new tab or window that a page opens by itself. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
+- <a id="popup-hijack"></a>**Popup hijack.** Sending a just-opened popup to another site before you've clicked in it. [Part I](01-attacks.md#the-popup-hijack)
+- <a id="prototype"></a>**Prototype.** The shared toolbox every object borrows its methods from; anyone in the page can swap a tool in it. [Part 0](00-basics.md#5-reading-just-enough-javascript)
+- <a id="rate-limit"></a>**Rate limit.** A cap on how often something may happen, such as "at most 20 log entries per 10 seconds". [Part IV](04-decisions.md#14-keeping-the-log-readable)
+- <a id="realm"></a>**Realm.** One JavaScript environment with its own `window` and tools; every frame has its own.
+- <a id="red-team"></a>**Red team.** People who deliberately try to defeat a protection, so their successes can be fixed and turned into tests. [Part IV](04-decisions.md#16-proving-every-attack-before-blocking-it)
+- <a id="redirect"></a>**Redirect.** Sending the current tab to a different address. [Part I](01-attacks.md#3-tricks-that-steal-the-tab-you-are-on)
+- <a id="server"></a>**Server.** A computer on the internet that sends pages to browsers that ask for them. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
+- <a id="service-worker"></a>**Service worker.** An extension's background program, started when needed and stopped when idle. [Part II](02-extensions.md#3-where-an-extensions-code-runs)
+- <a id="sha"></a>**SHA (commit SHA).** A long fingerprint that identifies one exact version of some code; it can't be moved to different code. [Part IV](04-decisions.md#17-protecting-the-build-itself)
+- <a id="shadow-root"></a>**Shadow root.** The hidden inside of a web component. A "closed" one hides its insides even from most scripts. [Part III](03-popshield.md#page-wide-hooks-including-big-wrappers)
+- <a id="site"></a>**Site.** Roughly the registered domain name, e.g. `example.com` for `www.example.com` and `cdn.example.com`. [Part 0](00-basics.md#4-who-is-allowed-to-touch-what)
+- <a id="stack-trace"></a>**Stack trace.** A record of which function called which, that JavaScript can read; V8's survive `await`. [Part III](03-popshield.md#buttons-that-wait-before-opening)
+- <a id="tab"></a>**Tab.** One page shown in the browser, with a little label at the top of the window. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
+- <a id="tab-under"></a>**Tab-under.** Opening your page again in a new tab, then turning the original tab into an ad. [Part I](01-attacks.md#the-tab-under)
+- <a id="tag"></a>**Tag.** A word in angle brackets in HTML, such as `<button>`. [Part 0](00-basics.md#1-what-a-web-page-is-made-of)
+- <a id="telemetry"></a>**Telemetry.** Data a program sends home about how it's used. PopShield has none.
+- <a id="threat-model"></a>**Threat model.** A clear statement of what an attacker can and can't do, which the design must withstand. [Architecture](../ARCHITECTURE.md#threat-model)
+- <a id="top-frame"></a>**Top frame.** The outermost page in a tab. [Part 0](00-basics.md#3-pages-inside-pages)
+- <a id="user-activation"></a>**User activation.** "The user did something recently." Chrome's popup blocker uses it; PopShield's bridge tracks its own version: a trusted activating gesture within the last 5 seconds. [Part I](01-attacks.md#4-why-chromes-own-popup-blocker-lets-them-through)
+- <a id="v8"></a>**V8.** The JavaScript engine inside Chrome and Chromium.
+- <a id="verdict"></a>**Verdict.** The bridge's answer to a question from a hook: `ok`, or the reason for blocking.
+- <a id="viewport"></a>**Viewport.** The part of the page currently visible in the window.
+- <a id="window"></a>**Window.** A browser window holding one or more tabs; also `window`, the JavaScript object for one tab's page. [Part 0](00-basics.md#2-what-happens-when-you-open-a-web-page)
+- <a id="world"></a>**World.** A separate JavaScript environment within a page; see *MAIN world* and *isolated world*. [Part II](02-extensions.md#4-two-worlds-inside-one-page)
+- <a id="z-index"></a>**z-index.** A CSS number deciding which element sits on top when elements overlap. [Part I](01-attacks.md#the-visible-ad-layer)

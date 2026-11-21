@@ -44,6 +44,7 @@
   const hasAttrNS = Element.prototype.hasAttributeNS;
   const elMatches = Element.prototype.matches;
   const elClosest = Element.prototype.closest;
+  const getRootNode = Node.prototype.getRootNode;
   const docQS = Document.prototype.querySelector;
   const docBaseURI = getter(Node.prototype, 'baseURI');
   const anchorHref = getter(HTMLAnchorElement.prototype, 'href');
@@ -67,6 +68,9 @@
   const getRandomValues = Crypto.prototype.getRandomValues;
   const Uint8 = Uint8Array;
   const numToString = Number.prototype.toString;
+  const perfNow = Performance.prototype.now;
+  const perfObj = W.performance;
+  const MapGet = Map.prototype.get, MapSet = Map.prototype.set, MapClear = Map.prototype.clear;
 
   const MARK = Symbol.for('popshield.installed');
   if (W[MARK]) return;
@@ -197,6 +201,9 @@
   const ELEM_FRAME = /\bat (?:async )?(?:HTML|SVG)\w*Element\./;
   function asyncOrigin() {
     try {
+      // The bridge only honours the async hint within 5 s of a trusted gesture:
+      // outside that window skip the 50-frame stack capture. (isTrusted can't be faked.)
+      if (R_apply(perfNow, perfObj, []) - lastTrusted > 5000) return false;
       if (getOwnDesc(ErrorCtor, 'prepareStackTrace')) return false; // page reformats stacks: fail closed
       const ld = getOwnDesc(ErrorCtor, 'stackTraceLimit');
       if (!ld || !('value' in ld) || !ld.writable) return false;
@@ -204,17 +211,20 @@
       try { ErrorCtor.stackTraceLimit = 50; st = new ErrorCtor().stack; } finally { ErrorCtor.stackTraceLimit = ld.value; }
       if (typeof st !== 'string') return false;
       const lines = R_apply(strSplit, st, ['\n']);
-      let elem = false;
-      for (let i = 0; i < lines.length; i++) {
+      // The element handler must be the BOTTOM of the synchronous stack (what a
+      // resumed `await` looks like), not something a timer called into, e.g. a
+      // listener for a fake event dispatched from setTimeout.
+      let marker = false, bottomSync = '';
+      for (let i = 1; i < lines.length; i++) {
         const l = lines[i];
         if (R_apply(strIndexOf, l, ['chrome-extension://']) !== -1) {
-          if (R_apply(strIndexOf, l, ['__popshieldFramework__']) !== -1) elem = true;
+          if (R_apply(strIndexOf, l, ['__popshieldFramework__']) !== -1) marker = true;
           continue; // our own hook frames
         }
         if (R_apply(reTest, PAGE_FRAME, [l])) return false;
-        if (R_apply(reTest, ELEM_FRAME, [l])) elem = true;
+        if (R_apply(strIndexOf, l, ['    at async ']) !== 0) bottomSync = l;
       }
-      return elem;
+      return marker || (!!bottomSync && R_apply(reTest, ELEM_FRAME, [bottomSync]));
     } catch { return false; }
   }
 
@@ -261,22 +271,36 @@
       return jq && typeof jq._data === 'function' && jq.fn && typeof jq.fn.jquery === 'string' && typeof jq.expando === 'string' ? jq : null;
     } catch { return null; }
   }
+  const reactKeys = []; // '__reactProps$<random>' names seen on this page (one per React copy)
+  const selCount = new Map(); // selector -> document-wide match count, for one gesture (cleared next task)
+  let selCountQueued = false;
   function attributeFrameworks(type, path) {
     const names = HANDLER_PROPS[type];
     if (!names) return;
     const body = D.body, html = D.documentElement;
+    const solidKey = '$$' + type;
     for (let i = 0; i < path.length; i++) {
       const n = path[i];
-      if (!isElement(n) || n === body || n === html) continue;
+      // composedPath() of a trusted event holds only elements, shadow roots, the document and the window:
+      // skip the known non-elements by identity instead of a guarded nodeType getter call per node.
+      if (n === W || n === D || n === body || n === html || n == null || typeof n !== 'object') continue;
+      // Fast path: the React props key(s) already seen on this page; no Object.keys allocation.
+      let known = false;
+      for (let r = 0; r < reactKeys.length; r++) {
+        let props; try { props = n[reactKeys[r]]; } catch {}
+        if (props && typeof props === 'object') { known = true; for (let q = 0; q < names.length; q++) wrapHandler(props, names[q]); }
+      }
+      if (known) continue;
       let keys;
       try { keys = ObjKeys(n); } catch { continue; }
       for (let j = 0; j < keys.length; j++) {
         const k = keys[j];
         // React <=16: __reactEventHandlers$x, React 17+: __reactProps$x (both hold the props).
         if (R_apply(strStartsWith, k, ['__reactProps$']) || R_apply(strStartsWith, k, ['__reactEventHandlers$'])) {
+          if (reactKeys.length < 4) { let seen = false; for (let r = 0; r < reactKeys.length; r++) if (reactKeys[r] === k) seen = true; if (!seen) reactKeys[reactKeys.length] = k; }
           let props; try { props = n[k]; } catch {}
           if (props && typeof props === 'object') for (let q = 0; q < names.length; q++) wrapHandler(props, names[q]);
-        } else if (k === '$$' + type) {
+        } else if (k === solidKey) {
           wrapHandler(n, k); // Solid's delegated handler
         }
       }
@@ -285,6 +309,9 @@
     // selectors only, never ones that match <body>/<html> or most of the page.
     const jq = realJQuery();
     if (!jq) return;
+    const t0 = path[0];
+    let inLightDom = false;
+    try { inLightDom = isElement(t0) && R_apply(getRootNode, t0, []) === D; } catch {}
     for (const g of [D, html, body]) {
       let list;
       try { const ev = g && jq._data(g, 'events'); list = ev && ev[type]; } catch {}
@@ -293,22 +320,39 @@
         const h = list[i];
         const sel = h && h.selector;
         if (typeof sel !== 'string' || !R_apply(reTest, /[.#[]/, [sel]) || R_apply(strIndexOf, sel, [':not(']) !== -1) continue;
-        if (safeMatches(body, sel) || safeMatches(html, sel)) continue;
-        let count = 0;
-        try { count = D.querySelectorAll(sel).length; } catch { continue; }
-        if (count > 50) continue;
-        for (let j = 0; j < path.length; j++) {
-          const n = path[j];
-          if (isElement(n) && n !== body && n !== html && safeMatches(n, sel)) { wrapHandler(h, 'handler'); break; }
+        // One native closest() from the target instead of matches() on every path node
+        // (closest() stops at shadow roots, so walk the path inside shadow DOM).
+        let hit = false;
+        if (inLightDom) {
+          let m = null;
+          try { m = R_apply(elClosest, t0, [sel]); } catch {}
+          hit = !!m && m !== body && m !== html;
+        } else {
+          for (let j = 0; j < path.length; j++) {
+            const n = path[j];
+            if (isElement(n) && n !== body && n !== html && safeMatches(n, sel)) { hit = true; break; }
+          }
         }
+        if (!hit) continue; // common case: no document-wide querySelectorAll at all
+        if (safeMatches(body, sel) || safeMatches(html, sel)) continue;
+        let count = R_apply(MapGet, selCount, [sel]);
+        if (count === undefined) {
+          try { count = D.querySelectorAll(sel).length; } catch { continue; }
+          R_apply(MapSet, selCount, [sel, count]);
+          if (!selCountQueued) { selCountQueued = true; R_apply(setTimeout_, W, [() => { selCountQueued = false; R_apply(MapClear, selCount, []); }, 0]); }
+        }
+        if (count > 50) continue;
+        wrapHandler(h, 'handler');
       }
     }
   }
 
   // Capturing listener at window (registered before any page listener).
   // Only attribution work happens here; keyboard only for Enter/Space.
+  let lastTrusted = -1e9; // performance.now() of the last trusted activating gesture (any key)
   function onGesture(e) {
     if (!e.isTrusted || mode === 'off') return;
+    lastTrusted = R_apply(perfNow, perfObj, []);
     let type;
     try { type = R_apply(evType, e, []); } catch { return; }
     if ((type === 'keydown' || type === 'keyup')) {

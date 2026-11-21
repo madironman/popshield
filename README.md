@@ -24,7 +24,7 @@
 
 ## Why
 
-On many free streaming sites, link shorteners and file hosts, **every click on the page opens an ad tab**, even a click on the video's play or volume button. Ad networks with "OnClick" popunder formats (Monetag-style scripts are a common example) attach one listener to the whole page. Any click anywhere then runs `window.open(ad)`.
+On many free streaming sites, link shorteners and file hosts, **every click on the page opens an ad tab**, even a click on the video's play or volume button. Ad networks with "OnClick" popunder formats attach one listener to the whole page. Any click anywhere then runs `window.open(ad)`.
 
 **Chrome's built-in popup blocker lets these through.** It only blocks popups opened *without* a user gesture, and here a real click did happen. It just wasn't a click on anything that should open a tab.
 
@@ -225,7 +225,7 @@ Measured with `npm run test:live` (real Chromium, real clicks, with and without 
 
 The two leaks in the second survey:
 
-- **A cuty.io-style shortener** that puts a max z-index offerwall image over its Continue button. This is what the ad-layer and tab-under checks were added for, and it's now covered by the test suite.
+- **A link shortener** that puts a max z-index offerwall image over its Continue button. This is what the ad-layer and tab-under checks were added for, and it's now covered by the test suite.
 - **A fake "Direct Download" button** on a file host. It's a plain link you really click, so it's allowed by design (see [limitations](#-known-limitations)).
 
 No false positives: legitimate `target=_blank` torrent download links, same-site Continue flows and manga chapter navigation all kept working.
@@ -360,7 +360,7 @@ popshield/
 │   ├── live.mjs           # before/after check against a real URL
 │   ├── server.mjs         # serves fixtures on localhost:8711 ("site") and 127.0.0.1:8712 ("ad network")
 │   └── fixtures/          # attack and legitimate scenario pages
-└── docs/                  # LEARN.md (tutorial), ARCHITECTURE.md (reference), RELEASING.md, assets/
+└── docs/                  # LEARN.md + learn/ (guide from zero), ARCHITECTURE.md (reference), RELEASING.md, assets/
 ```
 
 ## 🤝 Contributing

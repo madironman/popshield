@@ -23,26 +23,67 @@ Report privately through GitHub Security Advisories:
 You should get an acknowledgement within 7 days. Once a fix is ready it will be
 released and the advisory published, crediting you unless you prefer otherwise.
 
+## Threat model in brief
+
+PopShield assumes the web page is hostile. Ad scripts can add listeners
+anywhere, create overlays and frames, swap link addresses mid-click, navigate
+the top window, and replace any built-in function in the page's own
+JavaScript (MAIN) world. The full model is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#threat-model).
+
+- **No decisions in the page's world.** `src/inject.js` (MAIN world) only hooks
+  the APIs that open tabs and synchronously asks `src/bridge.js` (isolated
+  world, which pages cannot reach) for a verdict. It captures every built-in it
+  uses before any page script runs, and its two hints (framework attribution,
+  async origin) can only relax a check in a narrow, bounded way.
+- **A private channel.** The 128-bit nonce is exchanged once at
+  `document_start`, before any page script exists, and never re-broadcast.
+- **Only the bridge mints allow tokens**, each bound to a URL's site, valid for
+  3 s (15 s for right-click "Open link in new tab"), at most 4 per tab.
+- **The background worker trusts only bridge messages**: it whitelists message
+  types, kinds and reasons, rate-limits per tab, and takes the frame address
+  from `sender.url` (origin and path only).
+- **Defence in depth.** If a page subverts `inject.js`, the worst it gets is
+  skipping the early block; the backstop closes any new tab the bridge didn't
+  approve.
+- **Known residual risk.** A page that fakes framework data (for example React
+  props) on the element the user clicks, specifically to fool PopShield, can
+  get the framework exemption. The bridge then approves, so the backstop does
+  not help. Same-tab redirects have no backstop and rely on the bridge's
+  Navigation API and `beforeunload` guards.
+- **Supply chain.** Workflows pin actions to commit SHAs, use
+  `persist-credentials: false` and `npm ci --ignore-scripts`; releases are
+  built by a read-only job and published by a minimal job with a
+  build-provenance attestation.
+
 ## Scope
 
 In scope:
 
+- **Bypassing the bridge.** A web page that can get a new tab past the
+  backstop without the bridge's approval, influence a verdict in `bridge.js`,
+  learn or forge the channel nonce, or forge the messages the content scripts
+  send to the background worker (for example to mint a token or spoof the
+  blocked log).
 - **Detection or disabling by pages.** A web page that can reliably detect
-  PopShield, read or tamper with its state, unhook its `window.open` / link /
-  form / navigation guards, or forge the messages its content scripts send to
-  the background worker (for example to fake user intent or spoof the blocked log).
+  PopShield, read or tamper with its state, or unhook its `window.open` /
+  link / form / navigation guards. (Skipping only the early block in
+  `inject.js` while the backstop still closes the tab is expected behaviour.)
 - **Privilege issues.** Anything that lets a page or another extension use
   PopShield's permissions (`<all_urls>` host access, `storage`, `webNavigation`)
-  beyond what it already has, e.g. reading other sites' URLs or the per-site
-  mode list, or opening tabs on its own.
+  beyond what it already has, e.g. reading other sites' URLs, the per-site
+  mode list or the per-tab blocked lists, or opening tabs on its own.
 - **Unsafe UI.** Script injection through the toolbar popup or blocked log
   (for example a crafted URL rendered as HTML).
-- **Privacy leaks.** Anything that makes PopShield send data off the device. By
-  design it makes no network requests at all.
+- **Privacy leaks.** Anything that makes PopShield send data off the device,
+  or record which sites the user visits in persistent storage. By design it
+  makes no network requests at all and keeps only anonymous counts.
 
 Out of scope (please use the normal issue forms instead):
 
 - An ad that still gets through on some site: use **Ad got through**.
 - A legitimate popup or link that gets blocked: use **False positive**.
 - The known limitations listed in the README (e.g. the "Leave site?" prompt for
-  cross-site player iframes, opens scheduled with `setTimeout`).
+  cross-site player iframes, opens scheduled with `setTimeout`, ad links styled
+  as site buttons). Framework spoofing is a known residual risk, but a new,
+  practical way to exploit it is still welcome as a private report.

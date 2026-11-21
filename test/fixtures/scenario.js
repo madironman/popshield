@@ -16,7 +16,7 @@ function playerControls(parent = ui) {
 
 const S = {
   // ---------- attacks (should be blocked) ----------
-  'doc-click-popunder'() { // Monetag/PropellerAds "OnClick": hook every click on the page
+  'doc-click-popunder'() { // popunder network "OnClick" format: hook every click on the page
     playerControls();
     document.addEventListener('click', () => window.open(AD + '?doc', '_blank'));
   },
@@ -205,7 +205,7 @@ Object.assign(S, {
 });
 
 Object.assign(S, {
-  'ad-layer-tab-under'() { // visible max-z-index ad image over the Continue button (cuty.io-style)
+  'ad-layer-tab-under'() { // visible max-z-index ad image over the Continue button (link-shortener style)
     el('<button id="cont" style="position:absolute;left:400px;top:300px">Continue</button>');
     const img = el(`<img id="adimg" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'900\' height=\'500\'><rect width=\'900\' height=\'500\' fill=\'%23fc0\'/></svg>')}" style="position:absolute;left:50px;top:100px;width:900px;height:500px;z-index:2147483643">`);
     img.addEventListener('click', () => { window.open(location.href); window.open(AD + '?adlayer', '_self'); });
@@ -218,7 +218,7 @@ Object.assign(S, {
     el('<div style="position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.5)"><div style="background:#fff;margin:200px auto;width:300px;padding:20px"><button id="manage">Manage options</button></div></div>');
     $('#manage').addEventListener('click', () => window.open(AD + '?consent'));
   },
-  'adbox-frame'() { // vidsrc.to-style: blank iframe pinned at max z-index with a fake-CAPTCHA link
+  'adbox-frame'() { // streaming-player style: blank iframe pinned at max z-index with a fake-CAPTCHA link
     playerControls();
     const f = document.createElement('iframe');
     f.id = 'adbox';

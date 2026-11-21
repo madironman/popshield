@@ -73,8 +73,16 @@
 
   // ------------------------------------------------ messages to background
   function send(msg) { try { chrome.runtime.sendMessage(msg).catch(() => {}); } catch {} }
-  function allow(how, url, sameSiteOnly) {
-    send({ type: 'allow', how, url: typeof url === 'string' ? url.slice(0, 2000) : null, sameSiteOnly: !!sameSiteOnly });
+  let allowStart = 0, allowCount = 0;
+  // weak: the decision rested on a hint the page could influence (framework
+  // attribution, async origin); the background then follows the new tab's
+  // redirects and closes it if it ends up somewhere else.
+  function allow(how, url, sameSiteOnly, weak) {
+    lastNewTabAt = performance.now();
+    const now = Date.now();
+    if (now - allowStart > 10000) { allowStart = now; allowCount = 0; }
+    if (++allowCount > 12) return; // background's per-tab limit; a retry loop would only burn IPC
+    send({ type: 'allow', how, url: typeof url === 'string' ? url.slice(0, 2000) : null, sameSiteOnly: !!sameSiteOnly, weak: !!weak });
   }
   // Ad scripts retry blocked opens hundreds of times per click: report each
   // distinct block at most once per 5 s, and at most 20 per 10 s per frame.
@@ -111,7 +119,23 @@
     } catch { return false; }
   }
   function viewOf(el) { try { return el.ownerDocument.defaultView || window; } catch { return window; } }
-  function targetOf(e) { try { const p = e.composedPath(); if (p && p.length) return p[0]; } catch {} return e.target; }
+  // The element actually under the pointer, even inside a closed shadow root
+  // (whose host may have no box of its own, e.g. display: contents).
+  function targetOf(e) {
+    let t = null;
+    try { const p = e.composedPath(); if (p && p.length) t = p[0]; } catch {}
+    if (!t) t = e.target;
+    try {
+      for (let i = 0; i < 4 && t && t.nodeType === 1 && typeof e.clientX === 'number'; i++) {
+        const sr = chrome.dom && chrome.dom.openOrClosedShadowRoot(t);
+        if (!sr) break;
+        const inner = sr.elementFromPoint(e.clientX, e.clientY);
+        if (!inner || inner === t) break;
+        t = inner;
+      }
+    } catch {}
+    return t;
+  }
   function visibleArea(el, view) {
     const r = el.getBoundingClientRect();
     const vw = view.innerWidth || 1, vh = view.innerHeight || 1;
@@ -139,12 +163,48 @@
     }
     return o;
   }
-  function positionedWithin(el, levels) {
-    for (let n = el, i = 0; n && n.nodeType === 1 && i < levels; n = n.parentElement, i++) {
-      const p = viewOf(n).getComputedStyle(n).position;
-      if (p === 'fixed' || p === 'absolute') return true;
+  // Does a CSS background-image paint anything visible? (url() images do;
+  // gradients only if one of their colour stops is visibly opaque.)
+  function bgImageVisible(bi) {
+    if (!bi || bi === 'none') return false;
+    if (/url\(/i.test(bi)) return true;
+    // Computed gradients always serialise colours as rgb()/rgba().
+    const colors = bi.match(/rgba?\([^)]*\)/gi);
+    return !colors || colors.some((c) => alphaOf(c) >= 0.1);
+  }
+  // Does this element (or anything inside it) paint something the user can see?
+  function hasVisiblePaint(el) {
+    const view = viewOf(el);
+    const box = el.getBoundingClientRect();
+    const boxArea = Math.max(1, box.width * box.height);
+    const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    let n = el, steps = 0;
+    while (n && steps++ < 300) {
+      if (n.nodeType === 3) {
+        if (n.data.trim()) {
+          const cs = view.getComputedStyle(n.parentElement);
+          const fill = cs.getPropertyValue('-webkit-text-fill-color') || cs.color;
+          if (alphaOf(cs.color) >= 0.1 && alphaOf(fill) >= 0.1 && parseFloat(cs.fontSize) >= 6 &&
+              effectiveOpacity(n.parentElement) >= 0.2) return true;
+        }
+      } else {
+        const cs = view.getComputedStyle(n);
+        if (cs.display === 'none' || cs.visibility === 'hidden') { n = walker.nextSibling() || nextOutside(walker); continue; }
+        if (alphaOf(cs.backgroundColor) >= 0.1 || bgImageVisible(cs.backgroundImage)) {
+          if (effectiveOpacity(n) >= 0.2) return true;
+        }
+        if (/^(img|video|canvas|svg|picture|object|embed|iframe)$/.test(n.localName)) {
+          const r = n.getBoundingClientRect();
+          if ((r.width * r.height) / boxArea >= 0.1 && effectiveOpacity(n) >= 0.2) return true;
+        }
+      }
+      n = walker.nextNode();
     }
-    return false;
+    return steps >= 300; // huge subtree: assume visible
+  }
+  function nextOutside(walker) {
+    for (let p = walker.parentNode(); p; p = walker.parentNode()) { const s = walker.nextSibling(); if (s) return s; }
+    return null;
   }
 
   const INTERACTIVE = 'a[href],button,input,select,textarea,label,summary,[role=button],[role=link],[onclick],[contenteditable]';
@@ -160,18 +220,11 @@
       if (tag === 'video' || tag === 'img' || tag === 'canvas' || tag === 'svg') return false;
       const view = viewOf(el);
       if (visibleArea(el, view) < 0.35) return false;
-      if (!positionedWithin(el, 4)) return false;
       if (effectiveOpacity(el) < 0.2) return true;
-      // Fully transparent box: no background, no visible text, no sizeable visible media.
-      const cs = view.getComputedStyle(el);
-      if (cs.backgroundImage !== 'none' || alphaOf(cs.backgroundColor) >= 0.1) return false;
-      if ((el.innerText || '').trim()) return false;
-      const elArea = Math.max(1, el.getBoundingClientRect().width * el.getBoundingClientRect().height);
-      for (const m of el.querySelectorAll('img,video,canvas,svg,picture,object,embed,iframe')) {
-        const r = m.getBoundingClientRect();
-        if ((r.width * r.height) / elArea >= 0.1 && effectiveOpacity(m) >= 0.2) return false;
-      }
-      return true;
+      // Paints nothing visible (transparent text, transparent gradients, no
+      // sizeable visible media), however it got stacked on top: position,
+      // grid, negative margins, transforms.
+      return !hasVisiblePaint(el);
     } catch { return false; }
   }
 
@@ -195,15 +248,19 @@
   // A listener that sees every click: window/document/<html>/<body> of any
   // frame, or a wrapper element covering at least half the viewport (a
   // React-style root or "#app" div). Framework-attributed handlers are exempt.
-  function isPageWide(ct) {
+  // The geometry comes from the snapshot taken when the event started, so a
+  // handler can't shrink its wrapper just before it asks. A listener element
+  // that isn't on the event's path (detached, moved) is treated as page-wide.
+  function isPageWide(ct, snap) {
     try {
       if (!ct) return true;
       if (ct === window || ct === document || ct.window === ct) return true;
       if (ct.nodeType === 9 || ct.nodeType === 11) return true;
       if (ct.nodeType !== 1) return false;
       if (ct.localName === 'html' || ct.localName === 'body') return true;
+      if (snap) return !snap.path.has(ct) || snap.big.has(ct);
       if (ct.matches(INTERACTIVE)) return false;
-      return visibleArea(ct, viewOf(ct)) >= 0.5;
+      return visibleArea(ct, viewOf(ct)) >= 0.4;
     } catch { return true; }
   }
 
@@ -221,7 +278,15 @@
       return a.href;
     } catch { return ''; }
   }
-  function baseTarget(doc) { try { const b = doc.querySelector('base[target]'); return b ? b.getAttribute('target') : ''; } catch { return ''; } }
+  const baseLists = new WeakMap(); // document -> live HTMLCollection of <base>
+  function baseTarget(doc) {
+    try {
+      let bases = baseLists.get(doc);
+      if (!bases) baseLists.set(doc, bases = doc.getElementsByTagName('base'));
+      for (let i = 0; i < bases.length; i++) if (bases[i].hasAttribute('target')) return bases[i].getAttribute('target');
+      return '';
+    } catch { return ''; }
+  }
   function targetOpensNew(t) {
     t = String(t || '').toLowerCase();
     return t !== '' && t !== '_self' && t !== '_parent' && t !== '_top';
@@ -265,11 +330,8 @@
     return null;
   }
 
-  // Sign-in and payment providers: a popup or redirect to them after an await
-  // (no live click any more) is normal. Ads never qualify.
-  const ASYNC_OK = new Set(['google.com', 'apple.com', 'microsoftonline.com', 'live.com', 'microsoft.com', 'github.com',
-    'gitlab.com', 'facebook.com', 'x.com', 'twitter.com', 'linkedin.com', 'paypal.com', 'stripe.com', 'razorpay.com',
-    'auth0.com', 'okta.com', 'amazon.com', 'yahoo.com', 'discord.com', 'slack.com', 'zoom.us', 'dropbox.com', 'atlassian.com']);
+  // A sign-in or payment flow at a known provider (not one of its open redirectors).
+  function providerFlow(url) { const s2 = destSite(url); return !!s2 && PS.PROVIDERS.has(s2) && PS.looksLikeAuthOrPay(url); }
 
   // --------------------------------------------------------- gesture state
   const GESTURES = ['click', 'auxclick', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
@@ -279,10 +341,13 @@
   let lastAct = null;           // { t, target } of the last trusted activating gesture
   let gestures = 0;             // count of trusted activating gestures in this document
   let fwDepth = 0;              // > 0 while inject.js runs the clicked element's framework handler
-  let openedSinceGesture = false; // a script-opened tab was allowed since the last real gesture
+  let lastNewTabAt = -1e9;      // performance.now() of the last new tab we allowed from this tab
+  let lastPressAt = -1e9;       // performance.now() of the last trusted pointer/key press
   let lastFrameGesture = 0;     // (top) Date.now() of the last click inside a child frame
   let lastTopGesture = 0;       // Date.now() of the last trusted activating gesture in this frame
   let lastRelay = 0;            // (child) throttle for frame-gesture relays
+  let clickTask = null;         // the trusted click being handled in the current task
+  let enterTask = null;         // the trusted Enter keydown being handled in the current task
 
   function inDispatch() { return !!cur && cur.eventPhase !== 0; }
   // Transient user activation, tracked ourselves (navigator.userActivation is
@@ -295,20 +360,41 @@
     const e = cur;
     if (!e || e.eventPhase === 0) return 'no-gesture';
     if (!ACTIVATING.has(e.type)) return 'non-activating-event';
-    if (fwDepth === 0 && isPageWide(e.currentTarget)) return 'page-wide-listener';
+    const snap = snapshotFor(e);
+    if (fwDepth === 0 && isPageWide(e.currentTarget, snap)) return 'page-wide-listener';
+    return snap.target;
+  }
+  // Geometry snapshot, taken by our capture listener when a trusted activating
+  // event starts — before any page code runs — and shared by the events of one
+  // physical click (pointerup, mouseup, click) so page handlers in between
+  // can't remove an overlay or shrink a wrapper to fool the check.
+  let snap = null;
+  function snapshotFor(e) {
+    if (snap && snap.e === e) return snap;
     const t = targetOf(e);
-    if (isOverlay(t)) return 'invisible-overlay';
-    if (isAdLayer(t)) return 'ad-layer';
-    return 'ok';
+    if (snap && snap.t === t && Math.abs(e.timeStamp - snap.ts) < 1000) { snap.e = e; return snap; }
+    const big = new Set(), path = new Set();
+    let p = [];
+    try { p = e.composedPath(); } catch {}
+    for (let i = 0; i < p.length; i++) {
+      const n = p[i];
+      path.add(n);
+      try {
+        if (n && n.nodeType === 1 && n.localName !== 'html' && n.localName !== 'body' && !n.matches(INTERACTIVE) &&
+            visibleArea(n, viewOf(n)) >= 0.4) big.add(n);
+      } catch {}
+    }
+    const target = isOverlay(t) ? 'invisible-overlay' : isAdLayer(t) ? 'ad-layer' : 'ok';
+    return (snap = { e, t, ts: e.timeStamp, big, path, target });
   }
   // After an await: only to this site or a sign-in/payment provider, only
   // while Chrome still considers the user's click active.
   function asyncAllowed(url) {
     try {
       if (!lastAct || performance.now() - lastAct.t > 5000) return false;
-      if (isOverlay(lastAct.target) || isAdLayer(lastAct.target)) return false;
+      if (lastAct.verdict !== 'ok') return false;
       const s = destSite(url);
-      return !!s && (s === pageSite() || ASYNC_OK.has(s));
+      return !!s && (s === pageSite() || providerFlow(url));
     } catch { return false; }
   }
   function judge(url, async) {
@@ -328,7 +414,9 @@
     // Tab-under: opening *this same page* (any query) in a new tab during a click.
     if (v === 'ok' && !modeIs('off') && kind === 'popup' && url && url !== 'about:blank' && isSamePage(url)) v = 'tab-under';
     if (v === 'ok') {
-      if (!modeIs('off')) { openedSinceGesture = true; allow(kind, url, false); }
+      // Weak if it rested on the framework or async hint (both page-influenced).
+      // (Picture-in-Picture opens no tab, so it needs no backstop token.)
+      if (!modeIs('off') && url !== 'about:blank#picture-in-picture') allow(kind, url, false, fwDepth > 0 || !inDispatch());
     } else {
       block(kind, v, url);
     }
@@ -347,30 +435,37 @@
       const now = Date.now();
       if (now - lastRelay > 250) { lastRelay = now; send({ type: 'frameGesture' }); }
     }
-    if (ACTIVATING.has(type)) {
-      lastAct = { t: performance.now(), target: targetOf(e) };
+    if (type === 'pointerdown' || type === 'mousedown' || type === 'touchstart' || type === 'keydown') lastPressAt = performance.now();
+    const keyOk = (type !== 'keydown' && type !== 'keyup') || e.key === 'Enter' || e.key === ' ';
+    if (ACTIVATING.has(type) && keyOk) {
+      lastAct = { t: performance.now(), verdict: snapshotFor(e).target };
       gestures++;
-      openedSinceGesture = false;
       lastTopGesture = Date.now();
     }
+    // Native form submits are only the user's when they happen in the same
+    // task as their click / Enter (a page timer runs after our clear-out).
+    if (type === 'click') { clickTask = e; setTimeout(() => { if (clickTask === e) clickTask = null; }, 0); }
+    if (type === 'keydown' && e.key === 'Enter') { enterTask = e; setTimeout(() => { if (enterTask === e) enterTask = null; }, 0); }
 
     if (type === 'click' || type === 'auxclick' || type === 'contextmenu') {
       const a = clickedLink(e);
       const modifier = e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1;
-      if (a && type !== 'contextmenu' && (isOverlay(a) || (isDeadHref(a) && inAdBoxFrame(viewOf(a))))) {
+      const aOverlay = !!a && isOverlay(a);
+      const aDead = !!a && isDeadHref(a);
+      if (a && type !== 'contextmenu' && (aOverlay || (aDead && inAdBoxFrame(viewOf(a))))) {
         // Invisible full-page ad link, or a decoy link in an injected ad box.
         e.preventDefault();
         e.stopImmediatePropagation();
-        block('overlay-link', isOverlay(a) ? 'invisible-overlay' : 'ad-box-frame', linkHref(a), (a.textContent || '').trim());
+        block('overlay-link', aOverlay ? 'invisible-overlay' : 'ad-box-frame', linkHref(a), (a.textContent || '').trim());
         return;
       }
       if (type === 'contextmenu') {
         // "Open link in new tab" from the menu: only for a real, visible link.
-        if (a && !isDeadHref(a) && !isOverlay(a)) allow('contextmenu', linkHref(a), false);
+        if (a && !aDead && !aOverlay) allow('contextmenu', linkHref(a), false);
       } else if (a && (modifier || anchorOpensNew(a))) {
         // The user really clicked a link: the tab must open at that address. A
         // decoy ("#") link's tab must also stay on this site.
-        allow('user-link', linkHref(a), isDeadHref(a));
+        allow('user-link', linkHref(a), aDead);
       } else if (modifier) {
         // Modifier click with no link we can see: same-site tabs only.
         allow('user-link', null, true);
@@ -400,12 +495,12 @@
     if (inDispatch()) {
       v = judge(action, false);           // fired from inside an event handler
     } else {
-      // Native submit: must follow the user's own click / Enter on this form.
-      const prev = cur, src = prev && targetOf(prev);
-      const ok = !!prev && performance.now() - prev.timeStamp < 1000 &&
-        ((prev.type === 'click' && sub && src && sub.contains(src)) ||
-         ((prev.type === 'keydown' || prev.type === 'keyup') && src && f.contains(src)));
-      v = ok ? 'ok' : (modeIs('strict') ? 'strict-mode' : 'no-gesture');
+      // Native submit: must come from the user's own click on a visible submit
+      // button, or Enter in this form, in the same task.
+      const ct = clickTask && targetOf(clickTask), kt = enterTask && targetOf(enterTask);
+      const byClick = !!ct && !!sub && sub.contains(ct) && snapshotFor(clickTask).target === 'ok' && !isOverlay(sub);
+      const byEnter = !!kt && f.contains(kt);
+      v = byClick || byEnter ? 'ok' : (modeIs('strict') ? 'strict-mode' : 'no-gesture');
     }
     if (v === 'ok') { allow('user-form', action, false); return; }
     e.preventDefault();
@@ -415,15 +510,18 @@
   armWindow();
 
   // ------------------------------------- same-tab hijack redirects (top frame)
-  // The user's most recent click was inside a child frame, less than 4 s ago.
+  // The user's most recent click was inside a child frame, less than 6 s ago.
   // (When the user reloads or types a URL, focus moves to Chrome's toolbar, so
   // document.hasFocus() is false; an ad hijacking from inside the player
   // leaves the focus on the page.)
   function frameJustClicked() {
-    return Date.now() - lastFrameGesture < 4000 && lastFrameGesture >= lastTopGesture && document.hasFocus();
+    return Date.now() - lastFrameGesture < 6000 && lastFrameGesture >= lastTopGesture && document.hasFocus();
   }
   if (isTop) {
-    chrome.runtime.onMessage.addListener((m) => { if (m && m.type === 'frameGesture') lastFrameGesture = Date.now(); });
+    chrome.runtime.onMessage.addListener((m) => {
+      if (m && m.type === 'frameGesture') lastFrameGesture = Date.now();
+      else if (m && m.type === 'newTab') lastNewTabAt = performance.now(); // opened from any frame of this tab
+    });
     window.addEventListener('blur', onTopBlur, true);
     function onTopBlur() {
       const a = document.activeElement;
@@ -431,7 +529,8 @@
       lastFrameGesture = Date.now();
       // The click went into a large, near-invisible frame: an overlay, not the
       // thing the user saw. Tell the background not to trust that frame's clicks.
-      try { if (visibleArea(a, window) >= 0.35 && effectiveOpacity(a) < 0.2) send({ type: 'frameOverlay' }); } catch {}
+      // (A frame you can barely see that receives a click is an overlay, whatever its size.)
+      try { if (effectiveOpacity(a) < 0.5) send({ type: 'frameOverlay' }); } catch {}
     }
 
     if (window.navigation) {
@@ -441,31 +540,32 @@
         if (nt === 'traverse' || nt === 'reload' || e.hashChange || e.downloadRequest) return;
         const dest = e.destination && e.destination.url;
         const ds = destSite(dest);
-        if (!ds || ds === pageSite()) return;                 // same site / unknown scheme: never interfere
-        let reason = null;
-        if (openedSinceGesture) {
-          // Tab-under: a script opened a tab and now sends this tab elsewhere,
-          // before the user clicked again.
-          reason = 'tab-under';
-        } else if (!gestures && window.opener && !ASYNC_OK.has(ds)) {
-          // A popup we allowed is being sent somewhere else before anyone used it.
-          reason = 'popup-hijack';
-        } else {
-          if (!activationActive()) return;                   // not interaction-driven (e.g. on-load redirect)
-          const v = gestureVerdict();
-          if (v === 'ok') return;
-          if (v === 'no-gesture') {
-            if (frameJustClicked()) reason = 'embedded-frame';
-            else if (!ASYNC_OK.has(ds)) reason = 'no-gesture'; // timer / <meta refresh> right after a click
-          } else {
-            reason = v;
-          }
-          if (!reason && modeIs('strict')) reason = 'strict-mode';
-        }
+        if (!ds) return;                                      // mailto:, tel:, intent: ... never interfere
+        const reason = redirectReason(ds, dest);
         if (!reason) return;
+        if (ds === pageSite()) {
+          // Same site: let it go, but have the background follow it — a
+          // same-site redirector can bounce the tab to an ad.
+          send({ type: 'watchNav' });
+          return;
+        }
         e.preventDefault();
         block('redirect', reason, dest);
       });
+    }
+    // Would a script-driven navigation of this tab to `ds` be a hijack?
+    function redirectReason(ds, dest) {
+      if (providerFlow(dest)) return null;
+      // Tab-under: a new tab was opened from this tab and the user hasn't
+      // pressed anything since (a press within 0.5 s is the same click).
+      if (performance.now() - lastNewTabAt < 60000 && lastPressAt < lastNewTabAt + 500) return 'tab-under';
+      // A popup we allowed is being sent elsewhere before anyone used it.
+      if (!gestures && window.opener) return 'popup-hijack';
+      if (!activationActive()) return null;                 // not interaction-driven (e.g. on-load redirect)
+      const v = gestureVerdict();
+      if (v === 'ok') return modeIs('strict') && !inDispatch() ? 'strict-mode' : null;
+      if (v === 'no-gesture') return frameJustClicked() ? 'embedded-frame' : 'no-gesture';
+      return v;
     }
 
     // A cross-site iframe doing `top.location = ad` never fires the navigate

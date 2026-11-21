@@ -23,6 +23,7 @@ const REASONS = {
   'ad-box-frame': 'link inside an ad box pinned over the page',
   'tab-under': 'opened this page again and tried to turn this tab into an ad',
   'popup-hijack': 'a popup was sent to another site before you used it',
+  'redirect-chain': 'went through a redirect that ended on an unrelated site',
 };
 
 const $ = (s) => document.querySelector(s);
@@ -51,7 +52,7 @@ function openIssue(template, fields) {
   chrome.tabs.create({ url });
 }
 
-// ---- lifetime stats (stored only on this device) + user-initiated sharing
+// ---- lifetime stats (stored only on this device; never which sites)
 const nf = new Intl.NumberFormat();
 async function renderStats() {
   const { stats } = await chrome.storage.local.get({ stats: null });

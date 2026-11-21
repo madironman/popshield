@@ -177,7 +177,11 @@ async function act(page, how) {
     const humanClick = async () => { await page.mouse.move(x, y); await page.mouse.down(); await page.waitForTimeout(90); await page.mouse.up(); };
     await humanClick();
     if (how === 'iframe-human-x2') { await page.waitForTimeout(2500); return humanClick(); } // 2nd click well after focus moved in
-    await page.waitForTimeout(4500); // user watches a bit, then reloads / types a URL
+    // User watches a while, then reloads / types a URL. (In a real browser,
+    // clicking the reload button or the address bar takes focus away from the
+    // page, which already disarms the guard; headless Chromium can't emulate
+    // that, so wait past the 6 s frame-click window instead.)
+    await page.waitForTimeout(6500);
     if (how === 'iframe-wait-reload') return page.reload({ timeout: 5000 }).catch(() => {}); // a (wrongly) blocked navigation must not stall for 30s
     return page.goto('http://127.0.0.1:8712/ad.html?typed', { timeout: 5000 }).catch(() => {});
   }

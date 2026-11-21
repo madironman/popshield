@@ -326,7 +326,7 @@ anything else is `no-gesture` (or `strict-mode`).
 ```mermaid
 stateDiagram-v2
     [*] --> Issued: allow message from bridge.js
-    Issued --> Refused: child frame within 1.5 s of frameOverlay
+    [*] --> Refused: allow from a child frame within 1.5 s of frameOverlay
     Issued --> Spent: new tab arrives and a token fits
     Issued --> Expired: TTL passes (3 s, or 15 s for contextmenu)
     Issued --> Evicted: a 5th token arrives for the tab
@@ -340,7 +340,9 @@ stateDiagram-v2
 
 - Only `bridge.js` mints tokens. The worker accepts `allow` only with a
   whitelisted `how` (`popup`, `scripted-link`, `scripted-form`, `user-link`,
-  `user-form`, `contextmenu`), at most 12 per 10 s per tab.
+  `user-form`, `contextmenu`), at most 12 per 10 s per tab (the bridge also
+  stops sending after 12 per 10 s per frame, so a retry loop doesn't flood
+  the worker).
 - `tokens: Map<tabId, [{ exp, url, sameSiteOnly, frameId }]>` lives in worker
   memory only; at most 4 per tab (oldest dropped).
 - `tokenFits(t, url, srcSite)`:

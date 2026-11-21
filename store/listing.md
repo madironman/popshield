@@ -26,18 +26,31 @@ PopShield
 Stops sites from opening ad tabs, popups, popunders and hijack redirects, while the links you actually click keep working.
 ```
 
+The summary comes from `manifest.json` and has no room left for the privacy
+promise ("PopShield never records which sites you visit"), so the promise
+opens the detailed description below. A shorter manifest `description` that
+includes it would be, for example (112 characters):
+
+```
+Blocks ad tabs, popunders and hijack redirects. Links you click still work. Never records which sites you visit.
+```
+
 ### Detailed description (plain text, paste as is)
 
 ```
 PopShield stops websites from opening ad tabs, popups and popunders, and from hijacking the tab you are on with ad redirects. The tabs you open yourself keep working.
 
+PopShield never records which sites you visit. It keeps only an anonymous count of blocks on your device, and the list of what was blocked on a page disappears with the tab. No telemetry, no network requests, no remote code.
+
 Streaming, download and free-content sites often attach an ad script to the whole page. Every click anywhere, even on the play button or the volume slider, opens an ad tab behind your back or swaps the current tab for an ad. Chrome's built-in popup blocker lets this through because a real click happened. PopShield looks at where the click went and what the page did with it, and only lets a new tab open when you actually asked for one.
 
 WHAT IT BLOCKS
 - Popups and popunders opened by page-wide click hooks
-- Invisible full-page ad layers that turn any click into an ad tab
+- Invisible full-page ad layers and ad images stacked over buttons
 - Tab-under and click-hijack redirects that replace the page you were on
+- Popups sent to an ad site before you have used them
 - Fake clicks on hidden links and forms
+- Picture-in-Picture windows opened by ad scripts
 - Popups opened by timers or background code with no click at all
 - New tabs that a page opens without your action (closed instantly as a backstop)
 
@@ -45,7 +58,7 @@ WHAT KEEPS WORKING
 - Links you click, including target=_blank links
 - Ctrl/Cmd-click, middle-click and "Open link in new tab"
 - Share buttons, sign-in windows and other buttons that open a window when you click them
-- Sites built with React and jQuery, and buttons that open a tab after loading data
+- Sites built with React, Solid and jQuery, and sign-in or checkout buttons that open a window after loading data
 - Downloads, normal navigation and page reloads
 
 THREE MODES, PER SITE
@@ -55,20 +68,30 @@ THREE MODES, PER SITE
 Embedded players from other domains follow the mode of the page they are on.
 
 SEE WHAT WAS BLOCKED
-The toolbar badge counts what was stopped on the current page. Open the PopShield popup to see each blocked item and why it was blocked, and click Open on any item to open it anyway.
+The toolbar badge counts what was stopped on the current page. Open the PopShield popup to see each blocked item and why it was blocked, and click Open on any item to open it anyway. The popup also shows how many popups and redirects PopShield has blocked since you installed it, with a 14-day chart. You can reset this counter at any time.
+
+REPORT A SITE
+If ads still get through on a site, or something is blocked by mistake, the Report buttons open a pre-filled public GitHub issue that you can read and edit before submitting. PopShield itself never sends anything.
 
 PRIVATE BY DESIGN
+- PopShield never records which sites you visit
+- Only an anonymous count of blocks (total, per day, per kind) is kept, on your device
+- The list of what was blocked on a page lives only in that tab and is wiped when the tab navigates or closes, and when the browser exits
 - No data collection, analytics or telemetry
 - No network requests: PopShield never contacts any server
 - No remote code and no downloaded filter lists: everything ships in the extension
-- Only your mode settings are saved, on your device
+- No share or social features
 - Open source (MIT): https://github.com/madironman/popshield
 
+BUILT TO RESIST HOSTILE PAGES
+PopShield's decisions are made in Chrome's isolated extension environment, which web pages cannot see or tamper with, and a background safety net closes any new tab that was not approved there.
+
 WHY IT NEEDS ACCESS TO ALL SITES
-Ad tabs and redirects can come from any website and from embedded frames such as video players. PopShield must run on every page, before the page's own scripts, to stop them. It processes everything locally and stores nothing about the pages you visit.
+Ad tabs and redirects can come from any website and from embedded frames such as video players. PopShield must run on every page, before the page's own scripts, to stop them. It processes everything locally and never records the pages you visit.
 
 KNOWN LIMITATIONS
-- A few sites open a tab from a delayed timer after a real click. Smart mode blocks these. Use Open in the popup, or set that site to Off.
+- PopShield is not a content blocker. Ads that are ordinary links styled as the site's own buttons, and fake dialogs inside the page, are not removed. Use a content blocker alongside it.
+- Buttons that wait and then open an unrelated third-party site, or open a tab from a delayed timer, are blocked in Smart mode. Use Open in the popup, or set that site to Off.
 - If a cross-site video player tries to take over the whole tab, Chrome may show a "Leave site?" prompt. Click Cancel to stay on the page.
 ```
 
@@ -121,19 +144,19 @@ PopShield has one purpose: to stop websites from opening tabs, popups, popunders
 **storage**
 
 ```
-Saves the user's mode choices (Smart, Strict or Off, as a default and per site) in chrome.storage.local, and keeps the per-tab list of blocked items shown in the toolbar popup in chrome.storage.session (memory only, cleared when the tab navigates or closes). Nothing is synced or sent anywhere.
+Saves the user's mode choices (Smart, Strict or Off, as a default and for sites where the user picked a mode) and an anonymous block counter (total, per day, per kind of block; no site names or addresses) in chrome.storage.local. Keeps the per-tab list of blocked items shown in the toolbar popup in chrome.storage.session (memory only, cleared when the tab navigates or closes and when the browser exits). PopShield never records which sites the user visits. Nothing is synced or sent anywhere.
 ```
 
 **webNavigation**
 
 ```
-PopShield uses webNavigation.onCreatedNavigationTarget to detect when a page opens a new tab or window, so it can immediately close tabs the page opened without the user's click (the main defence against popunders that bypass the in-page checks). It uses webNavigation.onCommitted to reset the per-tab blocked list when the tab loads a new page. No navigation data is stored beyond the blocked list or transmitted.
+PopShield uses webNavigation.onCreatedNavigationTarget to detect when a page opens a new tab or window, so it can immediately close tabs the page opened without the user's click (the main defence against popunders that bypass the in-page checks). It uses webNavigation.onCommitted to reset the per-tab blocked list when the tab loads a new page. No navigation data is stored beyond that per-tab list, which lives only in memory for that tab, and nothing is transmitted.
 ```
 
 **Host permission: `<all_urls>`** (used by the content scripts and to read the tab's site in the popup)
 
 ```
-Ad popups, popunders, ad tabs and redirect hijacks can come from any website and from embedded cross-origin frames such as video players, so PopShield's content scripts must run on every page and in every frame at document_start, before the page's own scripts. One of them runs in the page's MAIN world so it can intercept window.open, scripted link clicks, form submits and redirect attempts and decide whether the user actually caused them. The host permission also lets the popup and background worker read the current tab's site to apply the per-site mode. A narrower match list is not possible because the user can meet these ads on any site. All processing is local; the extension makes no network requests and collects no data.
+Ad popups, popunders, ad tabs and redirect hijacks can come from any website and from embedded cross-origin frames such as video players, so PopShield's content scripts must run on every page and in every frame at document_start, before the page's own scripts. One of them runs in the page's MAIN world so it can intercept window.open, scripted link clicks, form submits and Picture-in-Picture windows; it asks the other, isolated-world content script, which decides whether the user actually caused them and guards against redirect hijacks. The host permission also lets the popup and background worker read the current tab's site to apply the per-site mode. A narrower match list is not possible because the user can meet these ads on any site. All processing is local; the extension makes no network requests and collects no data.
 ```
 
 ### Remote code
@@ -159,8 +182,12 @@ Leave **every box unticked**:
 - [ ] User activity
 - [ ] Website content
 
-(The blocked-items log and site settings never leave the device, so under the
-Chrome Web Store definition they are not "collected".)
+(The per-tab blocked list, the anonymous block counter and the mode settings
+never leave the device, so under the Chrome Web Store definition they are not
+"collected". The Report buttons only open a GitHub page that the user fills in
+and submits; PopShield transmits nothing. No permission is needed for the
+`chrome.dom` API, which PopShield uses to find links inside closed shadow
+roots.)
 
 Tick all three certifications:
 

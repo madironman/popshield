@@ -38,5 +38,19 @@ var PS = (() => {
   async function setDefaultMode(mode) {
     if (MODES.includes(mode)) await chrome.storage.local.set({ defaultMode: mode });
   }
-  return { MODES, siteOf, siteOfUrl, getSettings, getMode, setSiteMode, setDefaultMode };
+  // Sign-in and payment providers. Popups/redirects to them without a live
+  // click (after an await, an OAuth round-trip, a checkout hand-off) are normal.
+  const PROVIDERS = new Set(['google.com', 'apple.com', 'microsoftonline.com', 'live.com', 'microsoft.com', 'github.com',
+    'gitlab.com', 'facebook.com', 'x.com', 'twitter.com', 'linkedin.com', 'paypal.com', 'stripe.com', 'razorpay.com',
+    'auth0.com', 'okta.com', 'amazon.com', 'yahoo.com', 'discord.com', 'slack.com', 'zoom.us', 'dropbox.com', 'atlassian.com']);
+  // Does this provider URL look like the start of a sign-in or payment flow
+  // (rather than, say, one of the provider's open redirectors)?
+  function looksLikeAuthOrPay(u) {
+    try {
+      const x = new URL(u);
+      return /\/(o?auth\d?|authorize|oauth2?|signin|sign-in|login|logon|checkout\w*|pay|payment)s?(\/|$)/i.test(x.pathname) ||
+        /[?&](client_id|redirect_uri|response_type)=/.test(x.search);
+    } catch { return false; }
+  }
+  return { MODES, PROVIDERS, siteOf, siteOfUrl, looksLikeAuthOrPay, getSettings, getMode, setSiteMode, setDefaultMode };
 })();

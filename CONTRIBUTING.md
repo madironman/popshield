@@ -12,7 +12,7 @@ Security problems go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Development setup
 
-Requirements: Chrome or Chromium 111+, Node.js 22 (what CI uses; 18+ should work).
+Requirements: Chrome or Chromium 119+, Node.js 22 (what CI uses; 18+ should work).
 
 ```bash
 git clone https://github.com/madironman/popshield.git
@@ -36,10 +36,12 @@ There is no build step. What is in `src/` is what Chrome runs.
 | Path | What it is |
 |---|---|
 | `manifest.json` | Extension manifest |
-| `src/inject.js` | Page-world (`MAIN`) script: `window.open`, link, form, iframe and Navigation API hooks |
-| `src/bridge.js`, `src/common.js` | Isolated-world content scripts: relay between the page and the background worker, settings |
-| `src/background.js` | Service worker: blocked log, badge, backstop for new tabs |
-| `src/popup.html`, `src/popup.js` | Toolbar popup: blocked list, Open button, Smart/Strict/Off |
+| `src/inject.js` | Page-world (`MAIN`) hooks only: `window.open`, link clicks, `dispatchEvent`, `form.submit`, Picture-in-Picture, child-frame patching. It asks the bridge and supplies two hints; it decides nothing |
+| `src/bridge.js` | Isolated-world decision maker: judges every request, mints URL-bound tokens, runs the redirect, form and embedded-frame guards, writes the block log |
+| `src/common.js` | Shared helpers: sites, modes, the sign-in/payment provider list |
+| `src/background.js` | Service worker: validates bridge messages, backstop for new tabs, redirect-chain following, per-tab log, badge, anonymous counter |
+| `src/popup.html`, `src/popup.js` | Toolbar popup: counter, blocked list, Open, Smart/Strict/Off, Report and Feedback |
+| `src/welcome.html` | First-install welcome page |
 | `test/` | Playwright tests, local fixture server and attack fixtures |
 
 ## Tests
@@ -146,9 +148,12 @@ Don't paste URLs containing session tokens or personal data.
   part of this. **Pull requests that add remote code, remote configuration,
   analytics or tracking of any kind will be rejected.**
 - Don't add permissions to `manifest.json` without a clear reason in the PR.
-- `src/inject.js` runs in the page's own world: keep references to the
-  original browser functions captured at startup, don't leave globals behind,
-  and don't let pages see or undo the hooks.
+- `src/inject.js` runs in the page's own world, where a hostile page can
+  tamper with anything: capture every built-in at startup and call it through
+  `R_apply`, never make security decisions there, and never mint allow tokens
+  outside `src/bridge.js` (see [AGENTS.md](AGENTS.md)).
+- Never record which sites the user visits, and don't add share or social
+  features.
 - Keep pages working: when in doubt, prefer letting a legitimate action through
   (and covering the ad with a narrower rule) over a broad block.
 - Style: 2-space indentation, single quotes, semicolons, small functions with a
