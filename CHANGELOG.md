@@ -28,55 +28,87 @@ First public release.
   framework attribution and async origin (ignored if `Error.prepareStackTrace`
   is set). `bridge.js` judges with clean APIs, mints every allow token (each
   bound to a URL), runs the redirect, embedded-frame and native form-submit
-  guards, and writes the block log. A page that subverts `inject.js` can at
+  guards, and writes the block log.
+- **Geometry snapshot at gesture start.** The bridge measures the page when a
+  trusted activating event starts, before any page code runs, and the events
+  of one physical click (pointerup, mouseup, click) share that snapshot. An ad
+  can't remove its overlay or shrink its wrapper between your click and its
+  request. A page that subverts `inject.js` can at
   most skip the early block: the backstop still closes any tab the bridge
   didn't approve.
 - **Strict background worker.** Accepts only bridge messages; whitelists the
   kinds and reasons in the block log; rate-limits messages per tab; takes the
   frame address from `sender.url` (origin and path only); tokens last 3 s
   (15 s for right-click "Open link in new tab"), at most 4 per tab, and only
-  fit a new tab on the site they were minted for.
+  fit a new tab on the site they were minted for. Tokens for links the user
+  clicked fit only the exact page (origin and path).
 - **Page-wide listener detection.** Listeners on `window`, a document, a
-  shadow root, `<html>`, `<body>`, or a non-interactive wrapper element
-  covering at least 50% of the viewport cannot open tabs, unless the clicked
-  element's own framework handler is running.
-- **Invisible overlay guard.** Clicks that land on positioned elements covering
-  most of the screen with an effective opacity (multiplied up the ancestor
-  chain, including `filter: opacity()`) below 0.2, or on see-through boxes
-  with no visible content, are refused, including full-page
-  `<a target="_blank">` ad layers.
+  shadow root, `<html>`, `<body>`, a non-interactive wrapper element covering
+  at least 40% of the viewport, or an element that wasn't on the click's path
+  cannot open tabs, unless the clicked element's own framework handler is
+  running.
+- **Invisible overlay guard, judged by paint.** A click that lands on an
+  element covering at least 35% of the viewport that paints nothing visible is
+  refused, however the element is stacked (no positioning requirement: grid,
+  negative margins and transforms count). Invisible means an effective opacity
+  (multiplied up the ancestor chain, including `filter: opacity()`) below 0.2,
+  or no visible content inside: text with a transparent `color` or
+  `-webkit-text-fill-color` counts as invisible, gradients count only if a
+  colour stop is visible, and media must cover a real share of the element.
+  The element under the pointer inside a closed shadow root is measured via
+  `chrome.dom.openOrClosedShadowRoot`. Full-page `<a target="_blank">` ad
+  layers are blocked at the click.
 - **Ad-layer detection.** Clicks on non-interactive content of a visible layer
   stacked at (near) the maximum z-index over a large part of the page cannot
   open tabs or redirect.
 - **Scripted link and form hooks.** `a.click()`, `dispatchEvent(click)` on
   `_blank` HTML and SVG links, `form.submit()`, `requestSubmit()` and clicks on
   hidden submit buttons of `target="_blank"` forms follow the same intent
-  rules.
+  rules. A native `_blank` submit counts as the user's only in the same task
+  as their click on a visible submit button of that form, or their Enter in
+  it.
 - **Document Picture-in-Picture.** `documentPictureInPicture.requestWindow()`
   is judged like a popup.
 - **Fresh-iframe patching.** Newly created iframes are hooked before a page can
   borrow an unhooked `window.open` from them (including via `window.frames[i]`).
-- **Redirect guard (Navigation API).** In Smart mode, cross-site script
-  redirects of the current tab are blocked when they happen during a click but
-  don't come from an element-scoped handler, or come from a timer or
-  `<meta refresh>` right after a click (sign-in and payment providers
-  excepted). Same-site, on-load and user-initiated navigations still work.
+- **Redirect guard (Navigation API).** Cross-site script redirects of the
+  current tab are blocked when they happen during a click but don't come from
+  an element-scoped handler, or come from a timer or `<meta refresh>` within
+  5 s of a click. Sign-in and payment pages of known providers are exempt.
+  On-load and user-initiated navigations still work. A suspicious
+  navigation to the same site is let through but followed (see redirect
+  chains below).
+- **Smart and Strict redirect policy.** Smart (the default) allows a script
+  redirect more than about 5 s after the last click, so payment pages handing
+  off to a bank keep working; this is a documented, accepted trade-off.
+  Strict blocks every script-driven cross-site redirect once the user has
+  interacted with the page, however long it waits.
 - **Tab-under detection.** Opening this same page (any query string) in a new
-  tab is blocked, and after a script-opened tab, cross-site redirects of the
-  current tab stay blocked until the user's next real click.
+  tab is blocked. After any new tab is opened from a tab, script-driven
+  cross-site redirects of that tab are blocked for up to 60 s, until the user
+  presses something again at least 0.5 s later. The background remembers the
+  new tab per tab, so a hop to another page of the same site can't erase it.
 - **Popup-hijack guard.** A popup that has not received any user gesture yet
-  cannot be sent to another site (sign-in and payment providers excepted).
+  cannot be sent to another site (sign-in and payment pages excepted).
 - **Embedded-frame hijack guard.** When a cross-site player iframe tries to
-  navigate the whole tab (`top.location = ad`) within 4 s of a click inside a
-  frame, with no click on the main page since and while the page has focus,
-  PopShield holds the page so Chrome asks "Leave site?". The frame relays its
-  pointer-down to the top page through the background worker. Large,
-  near-invisible iframes are treated as overlays, and tokens from child frames
-  are refused right after a click into one. Reloads and typed URLs are never
+  navigate the whole tab (`top.location = ad`) within 6 s of a click inside a
+  frame, with no click on the main page since and while the page has focus
+  (`document.hasFocus()`), PopShield holds the page so Chrome asks "Leave
+  site?". The frame relays its pointer-down to the top page through the
+  background worker. A frame with an effective opacity below 0.5 that receives
+  a click is treated as an overlay, whatever its size, and tokens from child
+  frames are refused right after it. Reloads and typed URLs are never
   interrupted.
 - **Background backstop.** `webNavigation.onCreatedNavigationTarget` closes any
   new tab a page opened without a matching token from the bridge. It also
-  covers `blob:`, `about:`, `data:` and `file:` source tabs.
+  covers `blob:`, `about:`, `data:` and `file:` source tabs. When a script
+  swaps the address of a link the user clicked, the backstop closes the ad
+  tab and opens the page the user actually clicked (`link-swapped`).
+- **Redirect-chain following.** Tokens that rest on page-influenced evidence
+  (framework or async hints), same-site-only tokens, and suspicious same-site
+  navigations of the current tab are followed by the background through
+  `webNavigation.onCommitted` for 8 s. Landing on an unrelated site closes the
+  new tab or sends the tab back (`redirect-chain`).
 - **Link tokens.** `_blank` link clicks, ctrl / middle-click and right-click
   "Open link in new tab" on real, non-decoy links get a token for that link's
   address; links inside closed shadow roots are found via
@@ -88,24 +120,30 @@ First public release.
 - **Framework attribution.** Delegated handlers of React 16 and earlier
   (`__reactEventHandlers$`), React 17+ (`__reactProps$`), Solid (`$$click`) and
   a real jQuery (`$(document).on('click', selector, fn)` with a specific
-  selector matching at most 50 elements) count as element-scoped. Catch-all
-  selectors do not.
+  selector matching at most 50 elements) count as element-scoped. React props
+  count only if they were on the element at the first press event, so props
+  planted by page handlers don't. Catch-all selectors do not.
 - **Async/await attribution.** Opens after `await` inside an element's (or
-  framework's) handler are allowed within 5 s of a real click, but only to the
-  same site or a built-in list of sign-in and payment providers.
+  framework's) handler are allowed within 5 s of a real click on a real
+  target, but only when the element handler is the bottom of the synchronous
+  stack, and only to the same site or to a sign-in or payment page of a known
+  provider (`PS.looksLikeAuthOrPay`: not a provider's open redirectors).
 - **Survives `document.open()`.** Script-built frames (chat widgets, ad boxes)
   that rewrite themselves keep PopShield's listeners and channel, without a new
   handshake.
 - **Quiet logging.** Ad scripts that retry `window.open()` hundreds of times
   once blocked are reported once per 5 s (max 20 per 10 s per frame; the worker
-  accepts at most 30 per 10 s per tab).
-- **Per-site modes.** Smart (default), Strict (no script may open a tab; real
-  links, ctrl/middle-click, "Open link in new tab" and forms you submit still
-  work) and Off. Embedded frames follow the mode of the page that contains
-  them.
+  accepts at most 30 per 10 s per tab). The worker batches log, badge and
+  counter writes every 250 ms.
+- **Per-site modes.** Smart (default), Strict (no script may open a tab or,
+  after you interact with the page, redirect it to another site; real links,
+  ctrl/middle-click, "Open link in new tab" and forms you submit still work)
+  and Off. Embedded frames follow the mode of the page that contains them.
 - **Toolbar popup.** Badge count of blocked items, a list of everything blocked
-  on the page with an **Open** button for each, and the mode switch. Light and
-  dark themes.
+  on the page with an **Open** button for each and a plain-language reason
+  (including "went through a redirect that ended on an unrelated site" and "a
+  script swapped the link you clicked for an ad; the real link was opened
+  instead"), and the mode switch. Light and dark themes.
 - **Lifetime counter.** The popup shows "N popups & redirects blocked since
   <date> · N today" with a 14-day sparkline and a **Reset stats** link. Only
   anonymous counts (total, per day, per kind) are stored, on this device.
@@ -115,11 +153,14 @@ First public release.
   and submits; PopShield sends nothing itself. "Feedback" opens GitHub
   Discussions (Ideas).
 - **Welcome page** on first install.
-- **Tests.** End-to-end suite (`test/run.mjs`) that runs every scenario in real
-  Chromium without the extension (proving each attack works) and with
-  PopShield, in parallel browsers; popup UI test (`test/popup-ui.mjs`) with
-  screenshots; and a live checker (`npm run test:live -- <url>`) for real
-  sites.
+- **Tests.** End-to-end suite (`test/run.mjs`, 120 scenarios, 223 counted
+  checks, about 50 s) that runs every scenario in real Chromium without the
+  extension (proving each attack works) and with PopShield, in parallel
+  browsers. It includes 58 regression scenarios from three internal red-team
+  rounds. Cases marked `knownBypass` are reported but don't fail the run; the
+  only one is Smart mode's delayed redirect, an accepted trade-off. Also a
+  popup UI test (`test/popup-ui.mjs`) with screenshots, and a live checker
+  (`npm run test:live -- <url>`) for real sites.
 
 ### Security
 
@@ -133,7 +174,8 @@ First public release.
 - PopShield never records which sites you visit. Persistent storage holds only
   your mode settings and anonymous block counts; the per-page blocked list
   lives in session storage under its tab and is wiped when the tab navigates or
-  closes and when the browser exits.
+  closes and when the browser exits. The worker's short-lived working state
+  (tokens, redirect-chain watches, per-tab timestamps) stays in memory only.
 - No telemetry, no remote code, no remote lists, no network requests. No share
   or social features.
 

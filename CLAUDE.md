@@ -13,4 +13,6 @@ Non-negotiables (details in [AGENTS.md](AGENTS.md)):
 - Never record which sites the user visits: persistent storage holds only the user's mode settings and anonymous counts (total / day / kind).
 - No share or social features, no per-site stats.
 
-Mental model: `inject.js` (MAIN world, hooks) -> synchronous ask over a nonce channel -> `bridge.js` (isolated world, decides, mints URL-bound tokens, redirect/frame/form guards) -> `background.js` (validates bridge messages, closes un-tokened new tabs, per-tab session log, anonymous stats).
+Mental model: `inject.js` (MAIN world, hooks + two hints) -> synchronous ask over a nonce channel -> `bridge.js` (isolated world, decides from a geometry snapshot taken at gesture start, mints URL-bound tokens, redirect/frame/form guards) -> `background.js` (validates bridge messages, closes un-tokened new tabs, repairs swapped links, follows weak or suspicious navigations for 8 s, remembers per tab when it last opened a tab, per-tab session log, anonymous stats).
+
+Smart (default) deliberately allows a cross-site script redirect more than ~5 s after the last click (payment hand-offs); Strict blocks it. `rt-delayed-redirect` is the one `knownBypass` in `test/run.mjs` because of this. Don't "fix" it in Smart without discussion.

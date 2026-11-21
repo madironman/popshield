@@ -55,11 +55,23 @@ npm run test:live -- <url> [clicks]
 ```
 
 - **`test/run.mjs`** starts two local servers (`localhost:8711` for the page,
-  `127.0.0.1:8712` as the cross-site "ad" origin) and launches real headless
-  Chromium twice. The **baseline** run has no extension and proves each attack
-  really works in plain Chrome (with Chrome's own popup blocker on). The second
-  run loads PopShield and checks that every attack is blocked, every legitimate
-  pattern still works, and the block log contains the expected kinds.
+  `127.0.0.1:8712` as the cross-site "ad" origin, plus an open redirector at
+  `/__redir?to=`) and runs every case in real headless Chromium twice. The
+  **baseline** run has no extension and proves each attack really works in
+  plain Chrome (with Chrome's own popup blocker on). The second run loads
+  PopShield and checks that every attack is blocked, every legitimate pattern
+  still works, and the block log contains the expected kinds. Both passes run
+  at the same time across parallel browsers (sized from your CPU and memory;
+  set `E2E_WORKERS=N` to override). The full suite is 120 scenarios and 223
+  counted checks, and takes about 50 seconds. `rt-*` cases are regressions
+  from internal red-team rounds.
+- **Known bypasses.** A case with `knownBypass: true` is an attack the project
+  has decided not to block. It runs and is printed as `OPEN` (still gets
+  through) or `FIXD` (now blocked: remove the flag), but it doesn't fail the
+  run. The only one today is `rt-delayed-redirect` in Smart mode, the
+  deliberate trade-off that keeps payment hand-offs working; its Strict twin
+  must pass. Don't use `knownBypass` to park a test that fails for other
+  reasons.
 - **`test/popup-ui.mjs`** triggers real blocks, then checks the toolbar popup:
   badge count, blocked list, mode buttons and the Open button. It saves light
   and dark screenshots to `test/screenshots/` (git-ignored; CI uploads them as
@@ -99,22 +111,34 @@ without PopShield and fails with it.
    ```
 
    - `act`: what the test does: `'play'` (click the player's Play button),
-     `'#selector'`, `'ctrl:#sel'`, `'middle:#sel'`, `'enter:#sel'`, `'iframe'`
-     (click inside the player iframe), `'none'`, and others handled in `act()`.
+     `'#selector'`, `'ctrl:#sel'`, `'middle:#sel'`, `'rclick:#sel'`,
+     `'enter:#sel'`, `'key:<key>'`, `'wait:<ms>'`, `'iframe'` (click inside the
+     player iframe), `'frame:<iframe>:<el>'`, `'none'`, and others handled in
+     `act()`. Several steps can be chained with spaces, e.g.
+     `'rclick:#play wait:300 #play'`.
+   - `wait`: extra milliseconds to let a delayed attack play out.
    - `tabs` / `url`: the expected result **with** PopShield (`url` is `'same'`,
-     `'ad'` or `'other'`).
+     `'ad'`, `'other'` or `'hop'`). `adTab: true` / `false`: some new tab must /
+     must not end up at the ad page.
    - `blocked` / `blockedAny`: kinds that must appear in the block log (`popup`,
      `scripted-link`, `scripted-form`, `overlay-link`, `redirect`, `new-tab`).
      `blocked: []` means "nothing may be logged" and is how legitimate cases
      catch false positives.
    - `played` / `iframePlayed`: the page's own button must keep working.
+   - `dialog: 'beforeunload'` / `noDialog: true`: a "Leave site?" prompt must /
+     must not appear. `downloaded`, `maxBlocked`: a download must happen; the
+     log may hold at most this many entries.
    - `baseline`: what plain Chrome does without the extension, e.g.
      `{ tabs: 1 }` or `{ url: 'ad' }`. **This must show the attack succeeding**,
      otherwise the test proves nothing. If Chrome already blocks it, say so with
      `note`. Use `baseline: null` only for mode tests that have no meaningful
      baseline.
    - `mode` / `site`: run the case in `smart`, `strict` or `off`, or with
-     per-site overrides.
+     per-site overrides. For anything that differs between Smart and Strict,
+     add a twin with `name: '<t> (strict)'`, `mode: 'strict'`, `baseline: null`.
+   - `note`: why the case looks the way it does (printed with the result).
+     `knownBypass: true` only together with a `note` saying why the project
+     accepts it.
 
 3. **Add the legitimate counterpart** if your fix could affect real sites
    (name it `legit-...`, with `blocked: []`).

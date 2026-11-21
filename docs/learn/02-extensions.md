@@ -246,7 +246,7 @@ job.
 | Permission | What it lets PopShield do | Why it's needed |
 |---|---|---|
 | `storage` | keep data inside your browser | your mode choices, an anonymous counter of blocks, and the per-tab list of what was blocked |
-| `webNavigation` | be told when a tab opens a new tab, and when a tab loads a new page | the backstop closes tabs nobody approved; the per-tab list is reset on a new page |
+| `webNavigation` | be told when a tab opens a new tab, and when a tab lands on a new page | the backstop closes tabs nobody approved; for a few seconds after a doubtful approval, it checks where a tab actually lands; the per-tab list is reset on a new page |
 | access to all sites (`<all_urls>`) | run content scripts on every page and frame | ads appear on any site and inside frames from other sites |
 
 PopShield doesn't ask for your browsing history, your cookies, the ability to

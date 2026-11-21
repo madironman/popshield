@@ -64,7 +64,9 @@
 
   async function refresh() {
     try {
-      const m = await PS.getMode(topSite);
+      const m = chrome.extension.inIncognitoContext
+        ? ((await chrome.runtime.sendMessage({ type: 'getMode', site: topSite })) || {}).mode || 'smart'
+        : await PS.getMode(topSite);
       if (m !== mode) { mode = m; down({ type: 'mode', mode }); }
     } catch {}
   }
@@ -78,7 +80,10 @@
   // attribution, async origin); the background then follows the new tab's
   // redirects and closes it if it ends up somewhere else.
   function allow(how, url, sameSiteOnly, weak) {
-    lastNewTabAt = performance.now();
+    // A script-opened tab arms the tab-under rule right away (the redirect can
+    // follow in the same handler); user links and right-clicks arm it only
+    // once the background confirms a tab really opened ("newTab").
+    if (how === 'popup' || how === 'scripted-link' || how === 'scripted-form') lastNewTabAt = performance.now();
     const now = Date.now();
     if (now - allowStart > 10000) { allowStart = now; allowCount = 0; }
     if (++allowCount > 12) return; // background's per-tab limit; a retry loop would only burn IPC
@@ -200,7 +205,7 @@
       }
       n = walker.nextNode();
     }
-    return steps >= 300; // huge subtree: assume visible
+    return false; // nothing visible found within the first 300 nodes: treat as invisible
   }
   function nextOutside(walker) {
     for (let p = walker.parentNode(); p; p = walker.parentNode()) { const s = walker.nextSibling(); if (s) return s; }
@@ -246,7 +251,7 @@
   }
 
   // A listener that sees every click: window/document/<html>/<body> of any
-  // frame, or a wrapper element covering at least half the viewport (a
+  // frame, or a wrapper element covering at least 40% of the viewport (a
   // React-style root or "#app" div). Framework-attributed handlers are exempt.
   // The geometry comes from the snapshot taken when the event started, so a
   // handler can't shrink its wrapper just before it asks. A listener element
@@ -331,7 +336,7 @@
   }
 
   // A sign-in or payment flow at a known provider (not one of its open redirectors).
-  function providerFlow(url) { const s2 = destSite(url); return !!s2 && PS.PROVIDERS.has(s2) && PS.looksLikeAuthOrPay(url); }
+  function providerFlow(url) { return PS.isProviderFlow(url); }
 
   // --------------------------------------------------------- gesture state
   const GESTURES = ['click', 'auxclick', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
@@ -347,6 +352,8 @@
   let lastTopGesture = 0;       // Date.now() of the last trusted activating gesture in this frame
   let lastRelay = 0;            // (child) throttle for frame-gesture relays
   let clickTask = null;         // the trusted click being handled in the current task
+  let press = null;             // what the user pressed: { link, href, control, form, type, ftarget, faction }
+  let weakOpened = false;       // (top) this tab was opened on weak evidence and not used yet
   let enterTask = null;         // the trusted Enter keydown being handled in the current task
 
   function inDispatch() { return !!cur && cur.eventPhase !== 0; }
@@ -402,7 +409,26 @@
     if (modeIs('strict')) return 'strict-mode';
     const v = gestureVerdict();
     if (v === 'no-gesture' && async && asyncAllowed(url)) return 'ok';
+    // A cross-site popup from a listener on something that isn't clickable
+    // (ads attached to every element on the page): something between the
+    // clicked element and the listener must look clickable.
+    if (v === 'ok' && fwDepth === 0 && destSite(url) !== pageSite() && !clickablePath(cur)) return 'non-interactive-listener';
     return v;
+  }
+  function clickablePath(e) {
+    try {
+      const ct = e.currentTarget, p = e.composedPath();
+      for (let i = 0; i < p.length; i++) {
+        const n = p[i];
+        if (n && n.nodeType === 1) {
+          if (n.matches(INTERACTIVE)) return true;
+          const c = viewOf(n).getComputedStyle(n).cursor;
+          if (c && c !== 'auto' && c !== 'default' && c !== 'text') return true;
+        }
+        if (n === ct) break;
+      }
+      return false;
+    } catch { return true; }
   }
 
   const ASK_KINDS = { popup: 'popup', 'scripted-link': 'scripted-link', 'scripted-form': 'scripted-form' };
@@ -435,7 +461,14 @@
       const now = Date.now();
       if (now - lastRelay > 250) { lastRelay = now; send({ type: 'frameGesture' }); }
     }
-    if (type === 'pointerdown' || type === 'mousedown' || type === 'touchstart' || type === 'keydown') lastPressAt = performance.now();
+    if (type === 'pointerdown' || type === 'mousedown' || type === 'touchstart' || type === 'keydown') {
+      lastPressAt = performance.now();
+      // Snapshot what is being pressed, before page handlers can re-wire it
+      // (swap a link's address, attach a button to an ad form). The compat
+      // mousedown after a pointerdown is the same press.
+      // (mousedown / touchstart right after a pointerdown are the same press.)
+      if (!((type === 'mousedown' || type === 'touchstart') && press && press.type0 === 'pointerdown' && performance.now() - press.t < 1000)) press = pressSnapshot(e, type);
+    }
     const keyOk = (type !== 'keydown' && type !== 'keyup') || e.key === 'Enter' || e.key === ' ';
     if (ACTIVATING.has(type) && keyOk) {
       lastAct = { t: performance.now(), verdict: snapshotFor(e).target };
@@ -459,6 +492,16 @@
         block('overlay-link', aOverlay ? 'invisible-overlay' : 'ad-box-frame', linkHref(a), (a.textContent || '').trim());
         return;
       }
+      // The page re-pointed the pressed link to another site between press and click.
+      if (a && type !== 'contextmenu' && press && press.link === a && press.href) {
+        const now = linkHref(a);
+        if (now !== press.href && destSite(now) !== destSite(press.href)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          block('scripted-link', 'link-swapped', now);
+          return;
+        }
+      }
       if (type === 'contextmenu') {
         // "Open link in new tab" from the menu: only for a real, visible link.
         if (a && !aDead && !aOverlay) allow('contextmenu', linkHref(a), false);
@@ -471,6 +514,23 @@
         allow('user-link', null, true);
       }
     }
+  }
+  function pressSnapshot(e, type0) {
+    const snapP = { t: performance.now(), type0, link: null, href: '', control: null };
+    let p = [];
+    try { p = e.composedPath(); } catch {}
+    for (let i = 0; i < p.length; i++) {
+      const n = p[i];
+      if (!snapP.link && isLink(n)) { snapP.link = n; snapP.href = linkHref(n); }
+      if (!snapP.control && n && n.nodeType === 1 && (n.localName === 'button' || n.localName === 'input')) {
+        snapP.control = n;
+        try {
+          snapP.form = n.form; snapP.type = n.type;
+          snapP.ftarget = n.getAttribute('formtarget'); snapP.faction = n.getAttribute('formaction');
+        } catch {}
+      }
+    }
+    return snapP;
   }
   // document.open() erases this frame's window listeners too: armWindow() is
   // called again from the MutationObserver above when the document is replaced.
@@ -498,7 +558,10 @@
       // Native submit: must come from the user's own click on a visible submit
       // button, or Enter in this form, in the same task.
       const ct = clickTask && targetOf(clickTask), kt = enterTask && targetOf(enterTask);
-      const byClick = !!ct && !!sub && sub.contains(ct) && snapshotFor(clickTask).target === 'ok' && !isOverlay(sub);
+      const rewired = !!press && press.control === sub && (sub.form !== press.form || sub.type !== press.type ||
+        sub.getAttribute('formtarget') !== press.ftarget || sub.getAttribute('formaction') !== press.faction);
+      const byClick = !!ct && !!sub && sub.contains(ct) && snapshotFor(clickTask).target === 'ok' && !isOverlay(sub) && !rewired;
+      if (rewired) { e.preventDefault(); e.stopImmediatePropagation(); block('scripted-form', 'form-swapped', action); return; }
       const byEnter = !!kt && f.contains(kt);
       v = byClick || byEnter ? 'ok' : (modeIs('strict') ? 'strict-mode' : 'no-gesture');
     }
@@ -528,6 +591,7 @@
         if (r && typeof r.newTabAgo === 'number' && r.newTabAgo < 60000) {
           lastNewTabAt = Math.max(lastNewTabAt, performance.now() - r.newTabAgo);
         }
+        if (r && r.weakOpened) weakOpened = true;
       }).catch(() => {});
     } catch {}
     window.addEventListener('blur', onTopBlur, true);
@@ -551,6 +615,7 @@
         if (!ds) return;                                      // mailto:, tel:, intent: ... never interfere
         const reason = redirectReason(ds, dest);
         if (!reason) return;
+        if (reason === 'provider-flow') { send({ type: 'watchNav', also: dest }); return; }
         if (ds === pageSite()) {
           // Same site: let it go, but have the background follow it — a
           // same-site redirector can bounce the tab to an ad.
@@ -563,15 +628,17 @@
     }
     // Would a script-driven navigation of this tab to `ds` be a hijack?
     function redirectReason(ds, dest) {
-      if (providerFlow(dest)) return null;
       // Tab-under: a new tab was opened from this tab and the user hasn't
       // pressed anything since (a press within 0.5 s is the same click).
       if (performance.now() - lastNewTabAt < 60000 && lastPressAt < lastNewTabAt + 500) return 'tab-under';
       // A popup we allowed is being sent elsewhere before anyone used it.
-      if (!gestures && window.opener) return 'popup-hijack';
+      if (!gestures && (window.opener || weakOpened)) return 'popup-hijack';
       // Strict: once the user has interacted with this page, a script may not
       // send the tab to another site on its own, however long it waits.
       if (modeIs('strict') && gestures && !inDispatch()) return 'strict-mode';
+      // A sign-in or payment flow (exact provider hosts and paths): allowed,
+      // but the background follows where it goes next.
+      if (providerFlow(dest)) return 'provider-flow';
       if (!activationActive()) return null;                 // not interaction-driven (e.g. on-load redirect)
       const v = gestureVerdict();
       if (v === 'ok') return modeIs('strict') && !inDispatch() ? 'strict-mode' : null;

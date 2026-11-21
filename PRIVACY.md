@@ -52,6 +52,24 @@ device, and none of them is a record of the sites you visit.
 
 Chrome's own sync is not used, so none of this is copied to other devices.
 
+### Short-lived working memory (never stored)
+
+While it works, PopShield's background worker keeps a few things in its
+memory only, and never writes them to storage:
+
+- for a few seconds after you click a link or a page is allowed to open a
+  tab, the address that new tab is allowed to open (up to 15 seconds for
+  right-click "Open link in new tab"), so a tab you didn't ask for can be
+  told apart from one you did;
+- for up to 8 seconds after a doubtful approval, the site names a tab is
+  allowed to land on, so a redirect that bounces on to an unrelated site can
+  be undone;
+- for each tab, the time it last opened another tab, so a page can't turn
+  the tab you left behind into an ad.
+
+This is not a record of your browsing: it is never saved, never sent, and it
+is dropped when the tab closes or the worker stops.
+
 ## Reporting a problem (only when you choose to)
 
 The toolbar popup has **Report ads that got through** and **Report something
@@ -79,7 +97,8 @@ To stop a popup or redirect, PopShield has to run on every page and frame
 before the page's own scripts do. Its content scripts watch for attempts to
 open new tabs or redirect the current tab and decide, inside your browser,
 whether you actually asked for it. The `webNavigation` permission lets it close
-tabs that a page opened without your action. This processing happens locally
+tabs that a page opened without your action, and check, for a few seconds,
+where a doubtfully approved tab actually lands. This processing happens locally
 and nothing about the pages you visit is recorded beyond the per-tab blocked
 list described above, which disappears with the tab.
 

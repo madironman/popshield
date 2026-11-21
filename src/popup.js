@@ -1,6 +1,6 @@
 const HINTS = {
-  smart: 'Blocks tabs, popups and redirects that ad scripts trigger. New tabs you open yourself still work.',
-  strict: 'Blocks every new tab or popup that a script opens. Only links you click yourself can open a new tab.',
+  smart: 'Blocks tabs, popups and redirects that ad scripts trigger. New tabs you open yourself still work, and so do payment pages that hand you off to your bank a few seconds after you click.',
+  strict: 'Maximum protection: no script may open a tab, and once you have used a page no script may send it to another site. Only links you click yourself can open a new tab or leave the site.',
   off: 'PopShield does nothing on this site.',
 };
 const KINDS = {
@@ -24,6 +24,8 @@ const REASONS = {
   'tab-under': 'opened this page again and tried to turn this tab into an ad',
   'popup-hijack': 'a popup was sent to another site before you used it',
   'redirect-chain': 'went through a redirect that ended on an unrelated site',
+  'form-swapped': 'the button you pressed was re-wired to submit an ad form',
+  'non-interactive-listener': 'opened by a script on something that isn\'t a button or link',
   'link-swapped': 'a script swapped the link you clicked for an ad; the real link was opened instead',
 };
 
@@ -112,7 +114,7 @@ async function main() {
   $('#site').textContent = site;
 
   async function renderMode() {
-    const mode = await PS.getMode(site);
+    const mode = await PS.getMode(site, tab.incognito);
     document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
     $('#hint').textContent = HINTS[mode];
   }
@@ -120,7 +122,7 @@ async function main() {
     b.onclick = async () => {
       const s = await PS.getSettings();
       // Picking the default mode again removes the per-site override.
-      await PS.setSiteMode(site, b.dataset.mode === s.defaultMode ? null : b.dataset.mode);
+      await PS.setSiteMode(site, b.dataset.mode === s.defaultMode ? null : b.dataset.mode, tab.incognito);
       renderMode();
     };
   });
@@ -171,7 +173,7 @@ async function main() {
 
   async function report(template) {
     const items = (await chrome.storage.session.get({ ['log:' + tab.id]: [] }))['log:' + tab.id];
-    const mode = await PS.getMode(site);
+    const mode = await PS.getMode(site, tab.incognito);
     const common = {
       url: cleanUrl(tab.url),
       mode: mode === 'off' ? 'Off' : mode[0].toUpperCase() + mode.slice(1),

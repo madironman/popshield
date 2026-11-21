@@ -57,7 +57,15 @@
   const strSplit = String.prototype.split;
   const strIndexOf = String.prototype.indexOf;
   const strTrim = String.prototype.trim;
-  const reTest = RegExp.prototype.test;
+  const reExec = RegExp.prototype.exec; // test() would look up a (poisonable) live exec
+  const reMatch = (re, str_) => R_apply(reExec, re, [str_]) !== null;
+  const docQSA = Document.prototype.querySelectorAll;
+  const docBodyGet = getter(Document.prototype, 'body');
+  const docElGet = getter(Document.prototype, 'documentElement');
+  const getProto = Object.getPrototypeOf;
+  const PromiseReject = Promise.reject.bind(Promise);
+  const DOMExc = DOMException;
+  const nodeListLen = getter(NodeList.prototype, 'length');
   const JSONs = JSON.stringify;
   const JSONp = JSON.parse;
   const CustomEv = CustomEvent;
@@ -221,10 +229,10 @@
           if (R_apply(strIndexOf, l, ['__popshieldFramework__']) !== -1) marker = true;
           continue; // our own hook frames
         }
-        if (R_apply(reTest, PAGE_FRAME, [l])) return false;
+        if (reMatch(PAGE_FRAME, l)) return false;
         if (R_apply(strIndexOf, l, ['    at async ']) !== 0) bottomSync = l;
       }
-      return marker || (!!bottomSync && R_apply(reTest, ELEM_FRAME, [bottomSync]));
+      return marker || (!!bottomSync && reMatch(ELEM_FRAME, bottomSync));
     } catch { return false; }
   }
 
@@ -290,11 +298,11 @@
     try { type = R_apply(evType, e, []); } catch { return; }
     const now = R_apply(dateNow, Date, []);
     if (type === 'pointerdown') lastPointerDown = now;
-    else if (type === 'mousedown' && now - lastPointerDown < 1000) return;
+    else if ((type === 'mousedown' || type === 'touchstart') && now - lastPointerDown < 1000) return;
     let path;
     try { path = R_apply(origComposedPath, e, []); } catch { return; }
     propsAtPress = new WSet();
-    const body = D.body, html = D.documentElement;
+    const body = R_apply(docBodyGet, D, []), html = R_apply(docElGet, D, []);
     for (let i = 0; i < path.length; i++) {
       const n = path[i];
       if (n === W || n === D || n === body || n === html || n == null || typeof n !== 'object') continue;
@@ -310,7 +318,7 @@
   function attributeFrameworks(type, path) {
     const names = HANDLER_PROPS[type];
     if (!names) return;
-    const body = D.body, html = D.documentElement;
+    const body = R_apply(docBodyGet, D, []), html = R_apply(docElGet, D, []);
     const solidKey = '$$' + type;
     for (let i = 0; i < path.length; i++) {
       const n = path[i];
@@ -345,14 +353,16 @@
     const t0 = path[0];
     let inLightDom = false;
     try { inLightDom = isElement(t0) && R_apply(getRootNode, t0, []) === D; } catch {}
-    for (const g of [D, html, body]) {
+    const roots = [D, html, body];
+    for (let gi = 0; gi < roots.length; gi++) {
+      const g = roots[gi];
       let list;
       try { const ev = g && jq._data(g, 'events'); list = ev && ev[type]; } catch {}
       if (!list) continue;
       for (let i = 0; i < list.length; i++) {
         const h = list[i];
         const sel = h && h.selector;
-        if (typeof sel !== 'string' || !R_apply(reTest, /[.#[]/, [sel]) || R_apply(strIndexOf, sel, [':not(']) !== -1) continue;
+        if (typeof sel !== 'string' || !reMatch(/[.#[]/, sel) || R_apply(strIndexOf, sel, [':not(']) !== -1) continue;
         // One native closest() from the target instead of matches() on every path node
         // (closest() stops at shadow roots, so walk the path inside shadow DOM).
         let hit = false;
@@ -370,7 +380,7 @@
         if (safeMatches(body, sel) || safeMatches(html, sel)) continue;
         let count = R_apply(MapGet, selCount, [sel]);
         if (count === undefined) {
-          try { count = D.querySelectorAll(sel).length; } catch { continue; }
+          try { count = R_apply(nodeListLen, R_apply(docQSA, D, [sel]), []); } catch { continue; }
           R_apply(MapSet, selCount, [sel, count]);
           if (!selCountQueued) { selCountQueued = true; R_apply(setTimeout_, W, [() => { selCountQueued = false; R_apply(MapClear, selCount, []); }, 0]); }
         }
@@ -491,16 +501,16 @@
       try {
         const dpip = win.documentPictureInPicture;
         if (dpip) {
-          const proto = Object.getPrototypeOf(dpip);
+          const proto = getProto(dpip);
           const realReq = proto.requestWindow;
           if (typeof realReq === 'function') {
             defineProp(proto, 'requestWindow', {
               value: function requestWindow() {
                 try {
                   if (mode !== 'off' && ask('popup', 'about:blank#picture-in-picture') !== 'ok') {
-                    return Promise.reject(new DOMException('Blocked by PopShield', 'NotAllowedError'));
+                    return PromiseReject(new DOMExc('Blocked by PopShield', 'NotAllowedError'));
                   }
-                } catch { return Promise.reject(new DOMException('Blocked by PopShield', 'NotAllowedError')); }
+                } catch { return PromiseReject(new DOMExc('Blocked by PopShield', 'NotAllowedError')); }
                 return R_apply(realReq, this, arguments);
               }, writable: true, configurable: true,
             });
@@ -510,7 +520,9 @@
 
       // document.open()/write() erase listeners: re-arm attribution afterwards.
       const DP = win.Document.prototype;
-      for (const name of ['open', 'write', 'writeln']) {
+      const DOC_METHODS = ['open', 'write', 'writeln'];
+      for (let di = 0; di < DOC_METHODS.length; di++) {
+        const name = DOC_METHODS[di];
         const real = DP[name];
         if (typeof real !== 'function') continue;
         defineProp(DP, name, {
@@ -523,9 +535,13 @@
       }
 
       // Reaching into child frames: patch them before the caller gets the window.
-      for (const C of [win.HTMLIFrameElement, win.HTMLFrameElement, win.HTMLObjectElement]) {
+      const FRAME_CLASSES = [win.HTMLIFrameElement, win.HTMLFrameElement, win.HTMLObjectElement];
+      const FRAME_PROPS = ['contentWindow', 'contentDocument'];
+      for (let ci = 0; ci < FRAME_CLASSES.length; ci++) {
+        const C = FRAME_CLASSES[ci];
         if (!C) continue;
-        for (const prop of ['contentWindow', 'contentDocument']) {
+        for (let pi = 0; pi < FRAME_PROPS.length; pi++) {
+          const prop = FRAME_PROPS[pi];
           const d = getOwnDesc(C.prototype, prop);
           if (!d || !d.get) continue;
           defineProp(C.prototype, prop, {

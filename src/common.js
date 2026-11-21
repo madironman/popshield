@@ -24,12 +24,25 @@ var PS = (() => {
     if (!MODES.includes(s.defaultMode)) s.defaultMode = 'smart';
     return s;
   }
-  async function getMode(site) {
+  // Per-site choices made in incognito are kept in memory only
+  // (chrome.storage.session), so no incognito site name ever reaches disk.
+  async function getMode(site, incognito) {
     const s = await getSettings();
+    if (incognito && site) {
+      const { incogSites } = await chrome.storage.session.get({ incogSites: {} });
+      if (MODES.includes(incogSites[site])) return incogSites[site];
+    }
     const m = site && s.sites[site];
     return MODES.includes(m) ? m : s.defaultMode;
   }
-  async function setSiteMode(site, mode) {
+  async function setSiteMode(site, mode, incognito) {
+    if (incognito) {
+      const { incogSites } = await chrome.storage.session.get({ incogSites: {} });
+      if (mode === null) delete incogSites[site];
+      else if (MODES.includes(mode)) incogSites[site] = mode;
+      await chrome.storage.session.set({ incogSites });
+      return;
+    }
     const s = await getSettings();
     if (mode === null) delete s.sites[site];
     else if (MODES.includes(mode)) s.sites[site] = mode;
@@ -38,19 +51,45 @@ var PS = (() => {
   async function setDefaultMode(mode) {
     if (MODES.includes(mode)) await chrome.storage.local.set({ defaultMode: mode });
   }
-  // Sign-in and payment providers. Popups/redirects to them without a live
-  // click (after an await, an OAuth round-trip, a checkout hand-off) are normal.
-  const PROVIDERS = new Set(['google.com', 'apple.com', 'microsoftonline.com', 'live.com', 'microsoft.com', 'github.com',
-    'gitlab.com', 'facebook.com', 'x.com', 'twitter.com', 'linkedin.com', 'paypal.com', 'stripe.com', 'razorpay.com',
-    'auth0.com', 'okta.com', 'amazon.com', 'yahoo.com', 'discord.com', 'slack.com', 'zoom.us', 'dropbox.com', 'atlassian.com']);
-  // Does this provider URL look like the start of a sign-in or payment flow
-  // (rather than, say, one of the provider's open redirectors)?
-  function looksLikeAuthOrPay(u) {
+  // Sign-in and payment FLOWS a page may legitimately send you to without a
+  // live click (after an await, an OAuth round-trip, a checkout hand-off).
+  // Exact hosts + path prefixes only: never whole domains (multi-tenant
+  // domains like *.auth0.com host attacker content) and never "any URL with
+  // client_id=" (a page controls the query string).
+  const PROVIDER_FLOWS = [
+    ['accounts.google.com', /^\//],
+    ['appleid.apple.com', /^\/auth\//],
+    ['login.microsoftonline.com', /^\/[^/]+\/oauth2\//],
+    ['login.live.com', /^\/oauth20_authorize\.srf/],
+    ['github.com', /^\/login\/oauth\/authorize/],
+    ['gitlab.com', /^\/oauth\/authorize/],
+    ['www.facebook.com', /^\/(v\d+\.\d+\/)?dialog\/oauth/],
+    ['x.com', /^\/i\/oauth2\/authorize/],
+    ['twitter.com', /^\/i\/oauth2\/authorize/],
+    ['api.twitter.com', /^\/oauth\/authorize/],
+    ['www.linkedin.com', /^\/oauth\/v2\/authorization/],
+    ['discord.com', /^\/(api\/)?oauth2\/authorize/],
+    ['slack.com', /^\/(openid\/connect|oauth)\/(v2\/)?authorize/],
+    ['zoom.us', /^\/oauth\/authorize/],
+    ['www.dropbox.com', /^\/oauth2\/authorize/],
+    ['auth.atlassian.com', /^\/authorize/],
+    ['www.amazon.com', /^\/ap\/(signin|oa)/],
+    ['login.yahoo.com', /^\//],
+    ['www.paypal.com', /^\/(checkoutnow|signin|connect|webapps\/hermes|pay\/)/],
+    ['checkout.stripe.com', /^\//],
+    ['connect.stripe.com', /^\/oauth\/authorize/],
+    ['checkout.razorpay.com', /^\//],
+    ['api.razorpay.com', /^\/v1\/checkout\//],
+  ];
+  function isProviderFlow(u) {
     try {
       const x = new URL(u);
-      return /\/(o?auth\d?|authorize|oauth2?|signin|sign-in|login|logon|checkout\w*|pay|payment)s?(\/|$)/i.test(x.pathname) ||
-        /[?&](client_id|redirect_uri|response_type)=/.test(x.search);
+      if (x.protocol !== 'https:') return false;
+      for (let i = 0; i < PROVIDER_FLOWS.length; i++) {
+        if (x.hostname === PROVIDER_FLOWS[i][0] && PROVIDER_FLOWS[i][1].test(x.pathname)) return true;
+      }
+      return false;
     } catch { return false; }
   }
-  return { MODES, PROVIDERS, siteOf, siteOfUrl, looksLikeAuthOrPay, getSettings, getMode, setSiteMode, setDefaultMode };
+  return { MODES, siteOf, siteOfUrl, isProviderFlow, getSettings, getMode, setSiteMode, setDefaultMode };
 })();

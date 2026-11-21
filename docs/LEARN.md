@@ -38,7 +38,11 @@ If you only have five minutes:
   tamper with anything, so they only **ask**. Every decision is made in the
   extension's isolated world, which the page can't reach.
 - A safety net in the background closes any new tab that the isolated world
-  didn't approve.
+  didn't approve, and follows a tab for a few seconds when the approval rested
+  on thin evidence.
+- **Smart** mode (the default) keeps checkouts working by allowing a script
+  redirect more than about 5 seconds after your click. **Strict** mode blocks
+  that too, for sites you don't trust.
 - **PopShield never records which sites you visit.** It keeps only an
   anonymous count of blocks on your device, and the list of what was blocked
   on a page disappears with the tab.

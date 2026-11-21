@@ -21,8 +21,14 @@ if (!/^\d+(\.\d+){0,3}$/.test(version || '')) {
 }
 
 // ---- collect files (sorted, forward-slash paths relative to ROOT)
+// Refuse symlinks (they could pull in files from outside the repo) and
+// editor/patch leftovers that must never ship.
+const JUNK = /(\.(orig|rej|bak|swp|tmp)|~)$|(^|\/)\.[^/]+$/;
 function walk(rel) {
   const abs = path.join(ROOT, rel);
+  const lst = fs.lstatSync(abs);
+  if (lst.isSymbolicLink()) { console.error(`refusing symlink: ${rel}`); process.exit(1); }
+  if (JUNK.test(rel)) { console.error(`refusing stray file: ${rel} (delete it first)`); process.exit(1); }
   const st = fs.statSync(abs);
   if (st.isFile()) return [rel];
   return fs.readdirSync(abs).sort().flatMap((n) => walk(rel + '/' + n));

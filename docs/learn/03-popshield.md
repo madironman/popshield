@@ -37,9 +37,9 @@ four of these are true:
    whole page. A listener is
    **[page-wide](glossary.md#page-wide-listener)** if it sits on `window`, the
    `document`, `<html>`, `<body>`, or any ordinary element that covers at least
-   half of the screen.
-4. The click landed on something real: not an **invisible overlay**, and not
-   an **ad layer** stacked over the page.
+   40% of the screen.
+4. The click landed on something you could see: not an **invisible
+   overlay**, and not an **ad layer** stacked over the page.
 
 This is PopShield's **[intent model](glossary.md#intent-model)**. Links you
 really click (including ctrl-click, middle-click and right-click "Open link in
@@ -47,6 +47,12 @@ new tab") always work. Two refinements keep real websites working, and you'll
 meet them in chapter 3: some popular web frameworks run every button's code
 from one page-wide listener, and some buttons wait for a server reply
 (`await`) before opening a tab.
+
+There's one more idea that runs through everything below. A careful bouncer
+**takes a photo of the queue when the doorbell rings**, before anyone has a
+chance to shuffle places. PopShield does the same: it measures the page at the
+moment your click arrives, before the page's own code has reacted to it, and
+judges checks 3 and 4 against that photo. You'll see why in chapter 3.
 
 ### Check your understanding
 
@@ -99,9 +105,17 @@ Both PopShield content scripts start at `document_start`.
 ### The press and the click
 
 You press the mouse button: `pointerdown` and `mousedown` events travel
-through the page. The bridge notes them, but they aren't activating, so
-nothing else happens. You release: `pointerup`, `mouseup`, then `click`. The
-bridge records the click as the current gesture and notes the time. It also
+through the page. The bridge notes the time of the press, but these events
+aren't activating, so nothing else happens. You release: `pointerup`,
+`mouseup`, then `click`.
+
+The moment `pointerup` arrives, before any page listener has heard it, the
+bridge takes its photo, a **[snapshot](glossary.md#snapshot)** of the page:
+which element is really under your pointer, whether that element is an
+invisible overlay or an ad layer, every element the event will pass through,
+and which of them are big enough to count as page-wide. The `mouseup` and the
+`click` that follow belong to the same physical click, so they reuse that
+same photo. The bridge also records the click as the current gesture, and
 looks for a link under your pointer; there isn't one, you clicked a button.
 
 The click travels on. At the target, the site's listener changes the label to
@@ -147,9 +161,9 @@ sequenceDiagram
     participant SW as background.js
 
     U->>BR: press: pointerdown, mousedown
-    Note over BR: noted, not activating
+    Note over BR: press time noted, not activating
     U->>BR: release: pointerup, mouseup, click
-    Note over BR: current gesture = this click
+    Note over BR: snapshot taken at pointerup, current gesture = this click
     BR->>BTN: click reaches the button
     Note over BTN: label becomes Pause
     BTN->>DOC: click bubbles up to document
@@ -177,18 +191,18 @@ flowchart TD
     ASK --> C{"Mode is Strict?"}
     C -- "yes" --> X1["Blocked: strict-mode"]
     C -- "no" --> D{"A trusted gesture is being delivered now?"}
-    D -- "no" --> E{"inject.js says: after await, in an element's handler?"}
-    E -- "yes" --> E2{"Real click under 5 s ago, and the address is this site or a sign-in / payment provider?"}
+    D -- "no" --> E{"inject.js says: resumed after await, in an element's handler?"}
+    E -- "yes" --> E2{"Real click on a real target under 5 s ago, and the address is this site or a sign-in / payment page?"}
     E2 -- "yes" --> G
     E2 -- "no" --> X2["Blocked: no-gesture"]
     E -- "no" --> X2
     D -- "yes" --> F{"Activating event?"}
     F -- "no" --> X3["Blocked: non-activating-event"]
-    F -- "yes" --> F2{"Page-wide listener, and no framework handler running?"}
+    F -- "yes" --> F2{"Page-wide listener in the snapshot, and no framework handler running?"}
     F2 -- "yes" --> X4["Blocked: page-wide-listener"]
-    F2 -- "no" --> F3{"Clicked an invisible overlay?"}
+    F2 -- "no" --> F3{"Snapshot says: clicked an invisible overlay?"}
     F3 -- "yes" --> X5["Blocked: invisible-overlay"]
-    F3 -- "no" --> F4{"Clicked an ad layer?"}
+    F3 -- "no" --> F4{"Snapshot says: clicked an ad layer?"}
     F4 -- "yes" --> X6["Blocked: ad-layer"]
     F4 -- "no" --> G{"Opening this same page again?"}
     G -- "yes" --> X7["Blocked: tab-under"]
@@ -200,12 +214,17 @@ flowchart TD
 1. Which script decides that the popup is blocked?
 2. Why does the bridge already know about the click when the ad calls
    `window.open`?
+3. Why does the bridge take its snapshot at `pointerup`, and not when the ad
+   asks?
 
 <details><summary>Answers</summary>
 
 1. `bridge.js`. The hook in `inject.js` only asks and obeys.
 2. Its capture listeners on `window` ran first, before any page listener, and
    recorded the click as the current gesture.
+3. Between `pointerup` and the ad's question, page code has run. An ad could
+   use that moment to remove its overlay or shrink its wrapper, so measuring
+   later would measure the ad's disguise, not what you clicked.
 
 </details>
 
@@ -218,11 +237,25 @@ Each trick from Part I, and how PopShield answers it. Scenario names are in
 
 The bridge's `isPageWide()` treats as page-wide: `window`, any document,
 `<html>`, `<body>`, a **[shadow root](glossary.md#shadow-root)** (the hidden
-inside of a web component), and any ordinary element covering **at least 50%
+inside of a web component), and any ordinary element covering **at least 40%
 of the viewport** (the visible part of the page). Buttons, links and form
 fields are never page-wide, however big. An open from a page-wide listener
 gets `page-wide-listener`. (`doc-click-popunder`, `body-pointerup-popunder`,
-`wrapper-div-popunder`)
+`wrapper-div-popunder`, `rt-two-49pct-wrappers`)
+
+Why 40% and not "half"? Because "half" invited a trick: two wrappers side by
+side, each covering 49% of the screen, each listening for clicks. Each one
+slipped under the line, and together they heard every click.
+
+Two more rules come from the snapshot:
+
+- The sizes are measured **as your click arrives**, not when the ad asks. A wrapper
+  that shrinks itself to one pixel just before calling `window.open`, and
+  grows back right after, is judged at its full size
+  (`rt-wrapper-shrink-before-open`).
+- If the listener's element **wasn't on the path of your click** at all (it
+  was removed, or moved somewhere else in the page before asking), it can't
+  have been the element you meant to click, so it counts as page-wide too.
 
 ### Mouse-down popunders
 
@@ -232,13 +265,23 @@ dblclick, mouseup, pointerup, touchend, keydown and keyup. A `mousedown` or
 
 ### Invisible overlays
 
-`isOverlay()` flags an element that covers at least 35% of the viewport, is
-pinned in place (`position: fixed` or `absolute`, on itself or one of its three
-nearest parents), and is effectively invisible. "Effectively" is the key
-word. An ad can make its overlay invisible by setting a parent's opacity to 0,
-so the bridge computes the **[effective opacity](glossary.md#effective-opacity)**:
-the element's opacity multiplied by every parent's, including the
-`filter: opacity()` trick.
+An overlay is a sheet of glass laid over the page: you think you're touching
+the picture underneath, but your finger lands on the glass. PopShield's
+question is simple: **does this element paint anything you could see?**
+
+`isOverlay()` flags an element that covers at least 35% of the viewport and
+is effectively invisible. How it got on top doesn't matter. Pinning it with
+`position: fixed` is the classic way, but a grid cell, a negative margin or a
+transform can stack an element over the page just as well, so PopShield
+doesn't look at positioning at all (`rt-grid-overlay-link`). A video, an
+image, a canvas or an SVG drawing is never an overlay itself; it is content.
+
+"Effectively invisible" has two halves.
+
+**The element is see-through as a whole.** An ad can make its overlay
+invisible by setting a *parent's* opacity to 0, so the bridge computes the
+**[effective opacity](glossary.md#effective-opacity)**: the element's opacity
+multiplied by every parent's, including the `filter: opacity()` trick.
 
 ```js
 let o = 1;                                          // start fully visible
@@ -247,14 +290,46 @@ for (let n = el; n; n = n.parentElement) {          // walk up from the element 
 }                                                   // o is now how visible the element really is
 ```
 
-An element counts as an overlay if its effective opacity is below 0.2, or if
-it's a see-through box: no background picture, a background colour that's
-almost fully transparent (alpha below 0.1), no visible text, and no visible
-picture or video taking up at least 10% of it.
+Below 0.2, the element counts as invisible.
+
+**Or nothing inside it paints.** An element can be fully opaque and still
+show nothing, if everything inside it is transparent. So `hasVisiblePaint()`
+walks through the element and everything inside it, looking for one visible
+thing:
+
+```js
+// a simplified version of hasVisiblePaint(el)
+for (const n of everythingInside(el)) {                  // every element and piece of text inside, up to 300
+  if (isText(n) && textColourVisible(n)) return true;    // readable text: colour AND fill colour not transparent
+  if (backgroundVisible(n)) return true;                 // a background colour or picture that shows
+  if (isMedia(n) && coversTenPercent(n, el)) return true;// a picture, video or canvas of real size
+}                                                        // (each also needs effective opacity of at least 0.2)
+return false;                                            // nothing visible inside: it's glass
+```
+
+Each check closes a trick a red team tried:
+
+- **Text that isn't really there.** Text with `color: transparent`, or with
+  the lesser-known `-webkit-text-fill-color: transparent` (which overrides the
+  colour Chrome actually paints), counts as invisible. Tiny text below 6
+  pixels does too (`rt-overlay-transparent-text`).
+- **Gradients made of nothing.** A background "gradient" whose every colour
+  stop is transparent paints nothing, so it doesn't count as a background
+  (`rt-overlay-transparent-gradient`). A real picture (`url(...)`) does.
+- **A speck of content.** One tiny visible image in a corner doesn't make a
+  full-page sheet visible: media must cover at least 10% of the element.
+
+One more hiding place: a web component with a *closed* shadow root, whose
+insides even the event's path doesn't reveal. The bridge looks inside it with
+`chrome.dom.openOrClosedShadowRoot`, a helper only extensions have, and
+measures the element that's really under your pointer
+(`rt-closed-shadow-overlay`).
 
 If you click a link that is an overlay, the bridge cancels the click before
 any page listener hears it, and logs `overlay-link`. If an overlay's own
-listener calls `window.open`, the verdict is `invisible-overlay`.
+listener calls `window.open`, the verdict is `invisible-overlay`. And because
+the verdict comes from the snapshot, an overlay that deletes itself before
+asking is still caught (`rt-overlay-detach-before-open`).
 (`overlay-anchor`, `overlay-div-listener`)
 
 ### Visible ad layers
@@ -278,10 +353,33 @@ Download links pass through. (`synthetic-anchor-timer`, `dispatch-anchor`,
 
 Forms can also be sent without `submit()`: by a script clicking the hidden
 submit button, or with `requestSubmit()`. Those fire a `submit` event that the
-browser marks as trusted even when a script caused it, so the bridge judges
-it by its cause. If a listener is still running, the usual rules apply;
-otherwise the submit must follow, within one second, your own click on that
-submit button or Enter inside that form. (`submit-button-click` blocked;
+browser marks as trusted even when a script caused it, so the bridge judges it
+by its cause. If a listener is still running, the usual rules apply.
+Otherwise the browser is submitting the form as the default result of
+something, and that something must be **your own action, in the same task**:
+
+- your click on that form's submit button, where the button is visible and
+  your click didn't land on an overlay; or
+- your Enter key inside that form.
+
+A **task** is one turn of the browser's work loop: it handles one event (your
+click, say), runs everything that event triggers, and only then moves on.
+Code scheduled with a timer always runs in a later task. So PopShield marks
+your click "current" and clears the mark with a zero-length timer; a page
+timer that submits afterwards finds the mark gone.
+
+```js
+if (type === 'click') {                          // a trusted click just arrived
+  clickTask = e;                                 // mark it as "the user's click in this task"
+  setTimeout(() => {                             // in the NEXT task...
+    if (clickTask === e) clickTask = null;       // ...forget it again
+  }, 0);                                         // (0 ms: as soon as the current task is over)
+}
+```
+
+That is what stops a form submitted a moment after a keystroke in a search
+box (`rt-keystroke-requestsubmit`), or by an invisible submit button laid over
+the player (`rt-overlay-submit-button`). (`submit-button-click` blocked;
 `legit-form-blank`, `legit-form-enter-key` allowed)
 
 Chrome also has **Document Picture-in-Picture**, which lets a page open a
@@ -299,24 +397,48 @@ inside blank frames anyway. (`iframe-pristine-open`, `frames-index-open`)
 
 When you really click a link that opens a new tab (or ctrl-click,
 middle-click, or right-click it), the bridge gives the service worker a
-**ticket** for that link's address (chapter 5). If the link's address was a
-dead end at the moment you clicked (`#...`, empty, `javascript:`, or this
-same page), the ticket is also marked "same site only". So when the ad swaps
-the address mid-click, the new tab opens at the ad, finds no ticket that fits,
-and is closed. A genuine "open this page in a new tab" link still works.
-(`decoy-hash-swap` blocked, `legit-hash-blank` allowed)
+**ticket** for **exactly that page**: the link's origin and path (chapter 5).
+Two tricks try to spend that ticket on an ad.
+
+**The decoy.** If the link's address was a dead end at the moment you clicked
+(`#...`, empty, `javascript:`, or this same page), the ticket is also marked
+"same site only". So when the ad swaps the address mid-click, the new tab
+opens at the ad, finds no ticket that fits, and is closed. A genuine "open
+this page in a new tab" link still works. (`decoy-hash-swap` blocked,
+`legit-hash-blank` allowed)
+
+**The swap.** A real link to a real page, whose address a page-wide script
+changes during your click to something else, perhaps a "redirector" address
+on the same site that bounces on to an ad. The new tab doesn't match the
+exact page on your ticket. The worker notices that you *did* click a real
+link and closes the ad tab, then **opens the page you actually clicked** in
+its place, and logs `link-swapped` (`rt-link-href-swap-redirector`).
 
 Some links live inside a *closed* shadow root, where even the event's path
-doesn't reveal them. The bridge can look inside with `chrome.dom`, a helper
-only extensions have.
+doesn't reveal them. The bridge finds them with `chrome.dom` too
+(`legit-closed-shadow-link`).
 
 ### Tab-unders
 
 Two layers. First, opening **this same page** in a new tab during a click is
 refused as `tab-under`. "Same page" ignores everything after `?` and `#` in
-the address, so a cache-busting `?x=123` doesn't disguise it. Second, once any
-script-opened tab has been allowed, the tab you're on may not be sent to
-another site **until you click again**. (`tab-under`, `element-tab-under`)
+the address, so a cache-busting `?x=123` doesn't disguise it.
+
+Second, the tab you're on is watched after **any** new tab leaves it. For the
+next 60 seconds, a script may not send this tab to another site until you
+press something again (a mouse button, a key, a finger). Your press must come
+at least half a second after the new tab, so the very click that opened it
+doesn't count as "again". This covers a tab you opened yourself with a real
+link, too: the ad's favourite moment is right after you've looked away to
+the new tab (`rt-tabunder-after-user-link`).
+
+The bridge lives inside one page, and forgets everything when the tab moves
+to another page. An ad could exploit that: hop to another page of the same
+site (allowed, it's the same site), and redirect from there. So the service
+worker remembers, per tab, when it last opened a tab, and every new page in
+that tab asks it at startup: "did this tab open a tab recently?"
+(`rt-tabunder-samesite-hop`). (`tab-under`, `element-tab-under`,
+`rt-tabunder-pointerup-reset`)
 
 ### Redirects of the tab you're on
 
@@ -325,20 +447,35 @@ that announces every navigation of the top frame with a `navigate` event
 *before* it happens, and lets a listener cancel it. The bridge listens to it.
 It never interferes with navigations the browser marks as yours (a link you
 clicked, an address you typed), reloads, back and forward, downloads, or
-moves within the same site. For the rest (script-driven moves to another
-site), it blocks:
+addresses that aren't web pages (`mailto:` and the like). For the rest, it
+looks for a reason to object:
 
 - a tab-under (above);
-- a **popup hijack**: this is a popup nobody has clicked in yet, being sent to
-  another site that isn't a sign-in or payment provider;
+- a **popup hijack**: this is a popup nobody has clicked in yet, being sent
+  somewhere else;
+- in **Strict** mode, any script-driven move once you've interacted with the
+  page (chapter 7);
 - a move made during a click by a page-wide listener, an overlay, an ad layer
   or a mouse-down;
-- a move made by a timer or a `<meta refresh>` tag right after a click, unless
-  it goes to a sign-in or payment provider.
+- a move made by a timer or a `<meta refresh>` tag within 5 seconds of a
+  click.
 
 A move with no click in the last 5 seconds (a redirect when the page loads, a
-sign-in round trip) is left alone. (`click-redirect`, `open-self-redirect`
-blocked; `legit-same-site-redirect`, `legit-onload-redirect` allowed)
+sign-in round trip) is left alone in Smart mode. And a **sign-in or payment
+page** of a well-known provider (chapter 4 explains how one is recognised) is
+never a reason to object.
+
+What happens next depends on where the move goes. To **another site**, it is
+cancelled and logged. To **this same site**, it's let through, because sites
+move between their own pages all the time. But a same-site address can be a
+**redirector**, a page whose only job is to bounce you on somewhere else. So
+the bridge asks the service worker to keep an eye on the tab for 8 seconds;
+if the tab lands on an unrelated site, the worker sends it back and logs
+`redirect-chain` (`rt-redirector-navigation`). Chapter 5 shows how the worker
+follows a tab.
+
+(`click-redirect`, `open-self-redirect` blocked; `legit-same-site-redirect`,
+`legit-onload-redirect` allowed)
 
 ### Hijacks from the video player
 
@@ -346,7 +483,7 @@ When a player frame from another site does `top.location = AD`, Chrome sends
 **no** `navigate` event to the top page, so the guard above never sees it. The
 top page does still get `beforeunload`, the event behind the "Leave site?"
 question. PopShield asks Chrome to show that question when all of these hold:
-your most recent click was inside a frame, less than 4 seconds ago; you
+your most recent click was inside a frame, less than 6 seconds ago; you
 haven't clicked on the main page since; the page still has the keyboard
 focus; and the page contains a frame from another site. Click **Cancel** and
 you stay.
@@ -370,15 +507,17 @@ sequenceDiagram
     SW->>TB: frameGesture, to the top frame only
     Note over TB: remember: frame clicked just now
     AD->>TB: top.location = AD (no navigate event)
-    Note over TB: beforeunload, frame clicked under 4 s ago, page focused
+    Note over TB: beforeunload, frame clicked under 6 s ago, page focused
     TB-->>U: Chrome asks "Leave site?"
 ```
 
-If the frame you clicked into is large and nearly invisible, the click was
-really meant for what's underneath. The top bridge then tells the worker to
-refuse tickets from child frames of that tab for 1.5 seconds.
-(`player-iframe-top-redirect`, `player-iframe-top-redirect-2nd` prompted;
-`legit-player-then-reload`, `legit-player-then-type-url` not)
+If the frame you clicked into is hard to see (an effective opacity below 0.5,
+whatever its size), the click was really meant for what's underneath: a frame
+you can barely see that receives a click is an overlay. The top bridge then
+tells the worker to refuse tickets from child frames of that tab for 1.5
+seconds. (`player-iframe-top-redirect`, `player-iframe-top-redirect-2nd`,
+`rt-frame-redirect-after-4s` prompted; `rt-small-invisible-xframe` blocked;
+`legit-player-then-reload`, `legit-player-then-type-url` not prompted)
 
 ### Frameworks that delegate clicks
 
@@ -406,9 +545,18 @@ props.onClick = function () {                  // replace it, for this click onl
 
 While a framework handler is running, the bridge doesn't count the page-wide
 listener against the open. An ad's own listener on `document` runs outside
-any wrapper, so it's still blocked. jQuery only gets this for a genuine jQuery
-and for specific selectors (ones that name a class, id or attribute, match at
-most 50 elements, and don't match `<body>`); a catch-all `*` gets nothing.
+any wrapper, so it's still blocked.
+
+Framework data is just a property on an element, and a page can write one
+itself. So `inject.js` takes its own little snapshot too: at the **first press
+event** of a click (normally `pointerdown`), before any page listener runs, it
+notes every React data object already on the elements under your pointer.
+Only those count. React data planted by the page's own press handler, in the
+moment between your press and your click, is ignored (`rt-fake-react-props`).
+
+jQuery only gets this for a genuine jQuery and for specific selectors (ones
+that name a class, id or attribute, match at most 50 elements, and don't match
+`<body>`); a catch-all `*` gets nothing (`rt-fake-jquery`).
 (`legit-react16`, `legit-react17-root`, `legit-jquery-delegated` allowed;
 `react16-site-plus-popunder`, `jquery-star-popunder` blocked)
 
@@ -422,35 +570,74 @@ who called whom (a **[stack trace](glossary.md#stack-trace)**), and across
 `await` it remembers what the original listener was attached to:
 
 ```text
-at async HTMLButtonElement.<anonymous>   <- this code started in a button's listener
-at HTMLDocument.<anonymous>              <- this code started in a listener on document
+at HTMLButtonElement.<anonymous>         <- the bottom of the running code: a button's listener, resumed after await
+at async HTMLButtonElement.<anonymous>   <- (an outer async function that is also waiting)
+at HTMLDocument.<anonymous>              <- this would mean: started in a listener on document
 ```
 
-If the trace names an element and not the page, the hint says "after await, in
-an element's handler". But a page can fake stack traces, so the bridge never
-trusts the hint alone. It also requires that you really clicked (not on an
-overlay or ad layer) less than 5 seconds ago, and that the address is on this
-same site or on a short built-in list of sign-in and payment providers
-(`ASYNC_OK` in `bridge.js`: Google, Apple, Microsoft, GitHub, PayPal, Stripe
-and others). (`legit-async-open`, `legit-react17-async` allowed;
+The hint says "after await, in an element's handler" only if two things are
+true: no line names the page as a whole, and the **bottom** of the code that
+is running right now (the last line that isn't marked `async`) is an
+element's listener. The second rule matters. A timer can't resume an `await`,
+but it can call into an element's listener, for example by sending a fake
+event to a button. In that case the bottom of the stack is the timer's code,
+not the button, and the hint is "no" (`rt-async-forge-redirector`).
+
+A page can still fake stack traces, so the bridge never trusts the hint alone.
+It also requires that you really clicked, on a real target (not an overlay or
+ad layer), less than 5 seconds ago, and that the address is on this same site
+or is a **sign-in or payment page** of a provider on a short built-in list
+(`PROVIDERS` in `common.js`: Google, Apple, Microsoft, GitHub, PayPal, Stripe
+and others).
+
+"Sign-in or payment page" is checked by the address itself, with
+`looksLikeAuthOrPay()`: a path step such as `/oauth`, `/authorize`, `/login`,
+`/signin`, `/checkout` or `/pay`, or the typical sign-in parameters
+`client_id`, `redirect_uri` or `response_type`. Big providers also run "open
+redirectors", addresses that forward you anywhere you name; being on the
+provider's site isn't enough.
+
+```js
+function looksLikeAuthOrPay(u) {                              // does this address start a sign-in or payment?
+  const x = new URL(u);                                       // split the address into its parts
+  return /\/(o?auth\d?|authorize|signin|login|checkout\w*|pay)s?(\/|$)/i.test(x.pathname)  // a telling path step
+      || /[?&](client_id|redirect_uri|response_type)=/.test(x.search);                     // or sign-in parameters
+}                                                             // (simplified from src/common.js)
+```
+
+Because a hint can lie, a tab opened this way gets a **weak** ticket, and the
+service worker follows it after it opens (chapter 5).
+
+(`legit-async-open`, `legit-react17-async` allowed;
 `doc-async-await-popunder`, `async-cross-site-element` blocked)
 
 ### Check your understanding
 
 1. An ad hides an overlay by giving its *parent* `opacity: 0`. How does
    PopShield still notice?
-2. Why does framework attribution happen in `inject.js` and not in the bridge?
-3. A button waits for the server, then opens `https://some-ad.example`. What
+2. An overlay is fully opaque, but all its text is
+   `-webkit-text-fill-color: transparent` and its background is a gradient of
+   transparent colours. Overlay or not?
+3. Why does framework attribution happen in `inject.js` and not in the bridge?
+4. A button waits for the server, then opens `https://some-ad.example`. What
    happens?
+5. You click a `target="_blank"` link to an article. While your click is being
+   delivered, a script changes the link to point at an ad. What do you end up
+   with?
 
 <details><summary>Answers</summary>
 
 1. It multiplies opacity up the whole parent chain (effective opacity), so the
    overlay's effective opacity is 0.
-2. The bridge can't see page JavaScript objects such as React's data; only the
+2. An overlay (if it covers at least 35% of the view). Nothing inside paints
+   anything visible: both text colours count, and an all-transparent gradient
+   isn't a visible background.
+3. The bridge can't see page JavaScript objects such as React's data; only the
    MAIN world can.
-3. Blocked: after `await`, only the same site or a sign-in/payment provider is
-   allowed.
+4. Blocked: after `await`, only the same site or a provider's sign-in or
+   payment page is allowed.
+5. The article. The ad tab doesn't match your exact-page ticket, so the worker
+   closes it and opens the page you clicked instead (`link-swapped`).
 
 </details>
 
@@ -539,9 +726,12 @@ little:
   page-wide rule. Overlays, ad layers and the need for a real click still
   apply.
 - "This is after `await`, in an element's handler" only allows the same site
-  or a sign-in/payment provider, within 5 seconds of a real click. And if the
-  page has tampered with how stack traces are written, `inject.js` reports
-  "no".
+  or a provider's sign-in or payment page, within 5 seconds of a real click
+  on a real target. And if the page has tampered with how stack traces are
+  written, `inject.js` reports "no".
+
+Either way, the ticket the bridge issues is marked **weak**, and the service
+worker follows where the new tab goes (chapter 5).
 
 ### What if a page breaks `inject.js` anyway?
 
@@ -550,11 +740,11 @@ It skipped the early block, but the new tab still needs a ticket, and **only
 the bridge issues tickets**. The service worker closes the tab. The worst the
 page gets is a tab that flickers open and shut.
 
-The one trick the safety net can't catch is a page that *fakes a framework*:
-for example, planting fake React data on the button you're about to click. The
-bridge then approves honestly, based on a lie. That has to be aimed at
-PopShield on purpose, and only works on the element you click; it's listed in
-chapter 8.
+The one trick the safety net can't fully catch is a page that *fakes a
+framework*: for example, planting fake React data on the button you're about
+to click, before you press it. The bridge then approves honestly, based on a
+lie. That has to be aimed at PopShield on purpose, and only works on the
+element you click; it's listed in chapter 8.
 
 ### Check your understanding
 
@@ -584,42 +774,83 @@ Think of a **ticket** at a theatre. Every time the bridge approves a new tab,
 or sees you really click a link, it gives the service worker a ticket for
 that tab: an **[allow token](glossary.md#allow-token)**. When the browser
 reports that a tab opened a new tab, the worker looks for a ticket that fits.
-No ticket: it waits 400 milliseconds in case a ticket is on its way, looks
-again, and then closes the new tab and logs `new-tab` / `no-user-intent`.
+No ticket: it waits 400 milliseconds in case a ticket is on its way, and looks
+again. Still nothing: it closes the new tab and logs `new-tab` /
+`no-user-intent`, unless the swapped-link repair from chapter 3 applies.
 
 ```js
 if (takeToken(sourceTab, newTabUrl, sourceSite)) return;  // a ticket fits: the user wanted this tab
 await sleep(400);                                         // none yet: wait 0.4 s for a late ticket
 if (takeToken(sourceTab, newTabUrl, sourceSite)) return;  // look again
-chrome.tabs.remove(newTab);                               // still none: close the tab nobody approved
+const swapped = takeSwappedLink(sourceTab, newTabUrl);    // did the user click a real link to somewhere else?
+chrome.tabs.remove(newTab);                               // either way, close the tab nobody approved
+if (swapped) chrome.tabs.create({ url: swapped.url });    // and if so, open the page they actually clicked
 ```
 
 The tickets are deliberately hard to misuse:
 
 | Rule | Why |
 |---|---|
-| A ticket names a destination; the new tab must open on that site | a ticket for the link you clicked can't be spent on an ad tab opened in the same instant |
+| A ticket from a script open names a destination site; the new tab must open on that site | a ticket can't be spent on an ad tab to another site opened in the same instant |
+| A ticket from a link you clicked names the **exact page** (origin and path) | a script that swaps the link for a same-site redirector can't use it |
 | Valid for 3 seconds (15 seconds for right-click "Open link in new tab") | short enough not to become a standing permission; right-click menus take a human a moment |
 | At most 4 per tab | a page can't stockpile them |
 | "Same site only" for dead-end links and for modifier-clicks where no link was seen | an address swapped mid-click can't use it |
-| Refused from child frames for 1.5 s after a click into a near-invisible frame | that click wasn't meant for the frame |
+| Refused from child frames for 1.5 s after a click into a barely visible frame | that click wasn't meant for the frame |
 | Accepted only from PopShield's own scripts, at most 12 per 10 s per tab | the page's world can't send messages to the worker at all |
 
 The backstop stays on when the opener is a blank, `data:`, `blob:` or local
 file page, and is off for sites in Off mode and for the browser's own pages.
-It does nothing for redirects of the tab you're on; those rely on the guards in
-chapter 3.
+
+### Following a tab after it opens
+
+A ticket vouches for the **first** address a new tab opens at, and nothing
+more. That's a weak spot. A same-site address can be a redirector that
+bounces on to an ad a moment later, and a ticket that rests on a hint (a
+framework handler, or `await`) rests on something the page could have faked.
+
+So some tickets come with a **tail**, like a detective following a suspect
+for a few blocks. When the worker spends a *weak* ticket, or a *same site
+only* ticket, it keeps watching the new tab for 8 seconds through
+`webNavigation.onCommitted`, which the browser fires every time a tab
+actually lands on a new page. If the tab lands on a site that is neither the
+opener's site nor the site the ticket was for (a provider's sign-in or payment
+page is fine), the worker closes it and logs `redirect-chain`.
+
+```js
+if (tok.weak || tok.sameSiteOnly) {                         // the evidence for this tab was thin...
+  tabWatch.set(newTab, {                                    // ...so follow it
+    until: Date.now() + 8000,                               // for the next 8 seconds
+    allowed: new Set([sourceSite, siteOf(tok.url)]),        // these landing sites are fine
+  });
+}
+// later, every time a watched tab lands on a page:
+if (!landingOk(url, watch.allowed)) chrome.tabs.remove(tabId);  // an unrelated site: close the tab
+```
+
+The same tail follows **the tab you're on** after the redirect guard let a
+suspicious same-site move through (chapter 3). If that tab then lands on an
+unrelated site, the worker presses Back for you.
+
+Spending any ticket also tells the opener's page "a new tab just left you",
+which arms the tab-under rule from chapter 3. The worker keeps that moment per
+tab, so it survives the opener moving to another page.
 
 ### Check your understanding
 
 1. You click a link to a news site. In the same instant, an ad script opens a
    tab to an ad site by a route PopShield didn't hook. What happens to each
    tab?
+2. A framework handler (real or faked) opens `/go?to=ad` on the same site,
+   which forwards to an ad site. Which part of PopShield stops it, and when?
 
-<details><summary>Answer</summary>
+<details><summary>Answers</summary>
 
-The news tab spends the ticket minted for that link. The ad tab needs a ticket
-for the ad site; there is none, so the backstop closes it.
+1. The news tab spends the ticket minted for that link. The ad tab needs a
+   ticket for the ad site; there is none, so the backstop closes it.
+2. The bridge approves the open with a weak ticket, so the tab opens at
+   `/go`. The worker is following it, and when the tab lands on the ad site
+   a moment later, the worker closes it (`redirect-chain`).
 
 </details>
 
@@ -654,6 +885,13 @@ that's what lets you press **Open**. But it lives only in that tab's slot in
 memory: it is wiped when the tab goes to a new page, when the tab closes, and
 when the browser exits.
 
+The service worker also keeps a little **working memory** while it does its
+job: the tickets (with the address each is for), the tails from chapter 5
+(with the site names they allow), and the moment each tab last opened a tab.
+None of it is ever written to storage. Tickets expire within seconds, tails
+after 8 seconds, and all of it is dropped when the tab closes or the worker
+is stopped.
+
 PopShield makes no network requests and has no telemetry. The **Report**
 buttons in the popup only open a pre-filled GitHub issue page in a new tab;
 nothing is sent unless you submit that form yourself. There are no share
@@ -662,17 +900,24 @@ buttons.
 Ad scripts often retry a blocked popup hundreds of times. To keep the list
 readable, the bridge writes each distinct block at most once every 5 seconds
 and at most 20 per 10 seconds per frame, and the worker accepts at most 30 per
-10 seconds per tab (`retry-loop-popunder`).
+10 seconds per tab (`retry-loop-popunder`). The worker also gathers blocks for
+a quarter of a second and writes them in one go, instead of one storage write
+per block.
 
 ### Check your understanding
 
 1. Where is the list of what was blocked on a page kept, and when does it
    disappear?
+2. Does following a tab for 8 seconds mean PopShield keeps a history of where
+   your tabs went?
 
-<details><summary>Answer</summary>
+<details><summary>Answers</summary>
 
-In session memory, under that tab only. It disappears when the tab navigates
-to a new page, when the tab closes, and when the browser exits.
+1. In session memory, under that tab only. It disappears when the tab
+   navigates to a new page, when the tab closes, and when the browser exits.
+2. No. The worker only compares each landing against a short list of allowed
+   sites in its memory, and forgets the watch after 8 seconds. Nothing is
+   stored; only a block, if one happens, goes in that tab's list.
 
 </details>
 
@@ -683,9 +928,35 @@ Frames inside a page (such as a video player) follow the page's mode.
 
 | Mode | Scripts opening tabs | Links and forms you use | Redirects of your tab |
 |---|---|---|---|
-| **Smart** (default) | the bouncer's rules | allowed | the guards in chapter 3 |
-| **Strict** | never | allowed, including ctrl-click, middle-click and right-click "Open link in new tab" | as Smart, and redirects to sign-in/payment providers right after a click are blocked too |
+| **Smart** (default, the normal setting) | the bouncer's rules | allowed | the guards in chapter 3; a script redirect more than ~5 s after your last click is allowed |
+| **Strict** (maximum protection) | never | allowed, including ctrl-click, middle-click and right-click "Open link in new tab" | the guards in chapter 3, and once you've interacted with the page, no script may send the tab to another site, however long it waits |
 | **Off** | untouched | untouched | untouched; the backstop is off too |
+
+### The one trade-off between Smart and Strict
+
+Think about paying for something online. You click "Pay", the shop talks to
+the payment company, and a few seconds later a script sends your tab on to
+your bank to confirm. That's a script-driven move to another site, a while
+after your click, and it's perfectly honest.
+
+Smart mode is built to let that happen. A script move more than about 5
+seconds after your last click (with no new tab involved, and not from a popup
+nobody has clicked in) is allowed. The cost is real: an ad script that simply
+waits 5 seconds after your click, then sends your tab to an ad, gets through
+in Smart. PopShield's test suite keeps exactly that attack as a **known
+bypass** (`rt-delayed-redirect`): it runs every time and is reported, so
+nobody forgets it, but it doesn't fail the run, because it's a choice, not a
+bug.
+
+Strict mode makes the opposite choice. Once you've clicked or pressed a key on
+a page, no script may send that tab to another site on its own, however long
+it waits. Two things still work: a provider's sign-in or payment page, and a
+move made by the element you clicked while your click is still being
+delivered. A bank hand-off that goes elsewhere may be stopped; you'll see it
+in the list, with an **Open** button.
+
+So: keep Smart as your everyday setting, and switch a site you don't trust to
+Strict.
 
 The popup also shows the lifetime counter ("N popups & redirects blocked since
 <date> · N today") with a 14-day bar chart and a **Reset stats** link, the
@@ -695,11 +966,16 @@ and a **Feedback** link.
 ### Check your understanding
 
 1. In Strict mode, does a Share button that calls `window.open` work?
+2. You click Play, and 7 seconds later the page sends your tab to an ad site.
+   Smart or Strict: which one stops it?
 
-<details><summary>Answer</summary>
+<details><summary>Answers</summary>
 
-No. Strict allows no script-opened tabs at all. Links you click yourself still
-work.
+1. No. Strict allows no script-opened tabs at all. Links you click yourself
+   still work.
+2. Strict. In Smart, 7 seconds is past the 5-second window after your click,
+   so the move is allowed; that's the price of keeping checkout hand-offs
+   working.
 
 </details>
 
@@ -711,19 +987,28 @@ work.
   use one alongside PopShield.
 - **Fake dialogs and banner ads** inside the page aren't hidden. PopShield
   stops tabs and redirects, not page content.
+- **Patient redirects in Smart.** A script that waits more than about 5
+  seconds after your click before moving your tab to another site gets
+  through in Smart mode. Strict stops it (chapter 7).
 - **Faked frameworks.** A page that plants fake framework data on the element
-  you click, specifically to fool PopShield, gets the framework exemption, and
-  the safety net can't help because the bridge really approved.
+  you click *before you press it*, specifically to fool PopShield, gets the
+  framework exemption, and the bridge really approves. The tail from chapter 5
+  catches a bounce to a third site, but not an open straight to the ad.
 - **Waiting, then opening an unrelated site.** After `await`, only the same
-  site and the sign-in/payment list are allowed. Timers (`setTimeout`) and
-  `.then()` callbacks are blocked entirely. Use **Open** in the popup.
-- **Honest redirects right after a click** to another site (other than
-  sign-in/payment) are blocked in Smart.
-- **Unknown frameworks.** A page-sized container that runs every button's code
-  is treated as page-wide unless it belongs to React, Solid or jQuery.
+  site and providers' sign-in or payment pages are allowed. Timers
+  (`setTimeout`) and `.then()` callbacks are blocked entirely. Use **Open** in
+  the popup.
+- **Honest redirects right after a click** to another site (other than a
+  sign-in or payment page) are blocked, and so are script redirects within a
+  minute of the tab opening a new tab, until you press something.
+- **Unknown frameworks.** A container covering 40% or more of the page that
+  runs every button's code is treated as page-wide unless it belongs to React,
+  Solid or jQuery.
 - **Player hijacks** still show "Leave site?" instead of being cancelled
   silently.
-- **Same-tab redirects have no safety net**: they rely on the bridge's guards.
+- **Same-tab redirects have no safety net of tickets**: they rely on the
+  bridge's guards. When a same-site hop bounces on to an ad, the worker sends
+  the tab back, but the ad page has already loaded once.
 
 ### Check your understanding
 
@@ -732,7 +1017,8 @@ work.
 <details><summary>Answer</summary>
 
 The backstop closes tabs the bridge didn't approve. With faked framework data,
-the bridge itself is fooled into approving, so a ticket exists.
+the bridge itself is fooled into approving, so a ticket exists. The tail only
+notices if the tab then moves on to yet another site.
 
 </details>
 

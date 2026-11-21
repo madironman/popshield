@@ -38,19 +38,29 @@ JavaScript (MAIN) world. The full model is in
   async origin) can only relax a check in a narrow, bounded way.
 - **A private channel.** The 128-bit nonce is exchanged once at
   `document_start`, before any page script exists, and never re-broadcast.
-- **Only the bridge mints allow tokens**, each bound to a URL's site, valid for
-  3 s (15 s for right-click "Open link in new tab"), at most 4 per tab.
+- **Only the bridge mints allow tokens**, each bound to a URL's site (to the
+  exact page for links the user clicks), valid for 3 s (15 s for right-click
+  "Open link in new tab"), at most 4 per tab.
+- **Measured before the page can react.** Overlay and page-wide checks use a
+  snapshot taken when the user's gesture starts, before any page code runs.
+- **Thin evidence is followed.** Tokens that rest on a page-influenced hint,
+  and suspicious same-site navigations, are followed by the background for
+  8 s; a tab that lands on an unrelated site is closed or sent back.
 - **The background worker trusts only bridge messages**: it whitelists message
   types, kinds and reasons, rate-limits per tab, and takes the frame address
   from `sender.url` (origin and path only).
 - **Defence in depth.** If a page subverts `inject.js`, the worst it gets is
   skipping the early block; the backstop closes any new tab the bridge didn't
   approve.
-- **Known residual risk.** A page that fakes framework data (for example React
-  props) on the element the user clicks, specifically to fool PopShield, can
-  get the framework exemption. The bridge then approves, so the backstop does
-  not help. Same-tab redirects have no backstop and rely on the bridge's
-  Navigation API and `beforeunload` guards.
+- **Known residual risks.** A page that fakes framework data on the element
+  the user clicks *before the press* (React props), or fakes a Solid or jQuery
+  handler, specifically to fool PopShield, can get the framework exemption.
+  The bridge then approves; redirect chains are still caught, but an open
+  straight to the ad's address is not. Same-tab redirects have no token
+  backstop and rely on the bridge's Navigation API and `beforeunload` guards
+  plus the background's chain follower. In Smart mode, a script redirect more
+  than about 5 s after the last click is allowed by design (payment
+  hand-offs); Strict mode blocks it.
 - **Supply chain.** Workflows pin actions to commit SHAs, use
   `persist-credentials: false` and `npm ci --ignore-scripts`; releases are
   built by a read-only job and published by a minimal job with a
@@ -85,5 +95,6 @@ Out of scope (please use the normal issue forms instead):
 - A legitimate popup or link that gets blocked: use **False positive**.
 - The known limitations listed in the README (e.g. the "Leave site?" prompt for
   cross-site player iframes, opens scheduled with `setTimeout`, ad links styled
-  as site buttons). Framework spoofing is a known residual risk, but a new,
-  practical way to exploit it is still welcome as a private report.
+  as site buttons, Smart mode's delayed-redirect window). Framework spoofing
+  is a known residual risk, but a new, practical way to exploit it is still
+  welcome as a private report.

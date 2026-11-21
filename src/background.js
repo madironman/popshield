@@ -8,14 +8,14 @@
 importScripts('common.js');
 
 const TOKEN_TTL = 3000;        // ms a user-intended open stays valid
-const CONTEXTMENU_TTL = 15000; // right-click "Open link in new tab" takes a moment
+const CONTEXTMENU_TTL = 8000;  // right-click "Open link in new tab" takes a moment
 const MAX_TOKENS = 4;          // per tab
 const GRACE = 400;             // wait for a late token message before closing a tab
 const LOG_MAX = 50;
 
 const KINDS = new Set(['popup', 'new-tab', 'overlay-link', 'scripted-link', 'scripted-form', 'redirect']);
 const REASONS = new Set(['page-wide-listener', 'invisible-overlay', 'ad-layer', 'ad-box-frame', 'no-gesture',
-  'non-activating-event', 'strict-mode', 'no-user-intent', 'embedded-frame', 'tab-under', 'popup-hijack', 'redirect-chain', 'link-swapped']);
+  'non-activating-event', 'strict-mode', 'no-user-intent', 'embedded-frame', 'tab-under', 'popup-hijack', 'redirect-chain', 'link-swapped', 'form-swapped', 'non-interactive-listener']);
 const ALLOW_HOWS = new Set(['popup', 'scripted-link', 'scripted-form', 'user-link', 'user-form', 'contextmenu']);
 
 // ------------------------------------------------------------ rate limits
@@ -38,7 +38,7 @@ function addToken(tabId, frameId, how, url, sameSiteOnly, weak) {
   // A link the user clicked must open at exactly that page: a script swapping
   // the address mid-click (even to a same-site redirector) doesn't fit.
   const exact = how === 'user-link' || how === 'contextmenu';
-  arr.push({ exp: Date.now() + (how === 'contextmenu' ? CONTEXTMENU_TTL : TOKEN_TTL), url, sameSiteOnly: !!sameSiteOnly, frameId, weak: !!weak, exact });
+  arr.push({ exp: Date.now() + (how === 'contextmenu' ? CONTEXTMENU_TTL : TOKEN_TTL), url, sameSiteOnly: !!sameSiteOnly, frameId, weak: !!weak, exact, how });
   while (arr.length > MAX_TOKENS) arr.shift();
   tokens.set(tabId, arr);
 }
@@ -60,7 +60,7 @@ function tokenFits(t, url, srcSite) {
 function takeSwappedLink(tabId, url) {
   const arr = (tokens.get(tabId) || []).filter((t) => t.exp > Date.now());
   // (Not for decoy "#" links: their "real" target is just this page.)
-  const i = arr.findIndex((t) => t.exact && !t.sameSiteOnly && t.url && /^https?:/.test(t.url) && t.url !== url);
+  const i = arr.findIndex((t) => t.how === 'user-link' && !t.sameSiteOnly && t.url && /^https?:/.test(t.url) && t.url !== url);
   const tok = i >= 0 ? arr.splice(i, 1)[0] : null;
   tokens.set(tabId, arr);
   return tok;
@@ -86,8 +86,17 @@ const navWatch = new Map(); // tabId -> { until, site }
 function landingOk(url, allowed) {
   const site = PS.siteOfUrl(url);
   if (!site) return true; // about:blank, data: ... nothing to judge yet
-  return allowed.has(site) || (PS.PROVIDERS.has(site) && PS.looksLikeAuthOrPay(url));
+  return allowed.has(site) || PS.isProviderFlow(url);
 }
+// Only act on hops the page or server made, never on the user's own
+// navigation (typed URL, bookmark, link click, back/forward, reload).
+function isRedirectHop(d) {
+  const q = d.transitionQualifiers || [];
+  if (q.includes('forward_back') || q.includes('from_address_bar')) return false;
+  if (['typed', 'auto_bookmark', 'generated', 'keyword', 'keyword_generated', 'reload'].includes(d.transitionType)) return false;
+  return q.includes('server_redirect') || q.includes('client_redirect');
+}
+const weakTabs = new Set(); // tabs opened on weak evidence, until their first page asks
 const restoring = new Set(); // tabs we are sending back: keep their log
 // When a tab last opened another tab. Kept here (not in the page) so a hop to
 // another page of the same site can't make the opener "forget" it.
@@ -195,13 +204,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // A top frame asks at startup: did this tab open another tab recently?
     if (sender.frameId !== 0) return;
     const at = newTabAt.get(tabId);
-    sendResponse({ newTabAgo: at ? Date.now() - at : null });
+    const weakOpened = weakTabs.delete(tabId);
+    sendResponse({ newTabAgo: at ? Date.now() - at : null, weakOpened });
     return;
+  } else if (msg.type === 'getMode') {
+    // Incognito tabs: per-site choices made there live only in memory.
+    const site = typeof msg.site === 'string' ? msg.site.slice(0, 255) : null;
+    PS.getMode(site, !!sender.tab.incognito).then((mode) => sendResponse({ mode })).catch(() => sendResponse({ mode: 'smart' }));
+    return true;
   } else if (msg.type === 'watchNav') {
     // The top frame let a suspicious same-site navigation through: follow it.
     if (sender.frameId !== 0) return;
     const site = PS.siteOfUrl(sender.url || '');
-    if (site) navWatch.set(tabId, { until: Date.now() + WATCH_MS, site });
+    // `also`: the sign-in/payment host the page is handing off to.
+    const also = typeof msg.also === 'string' && PS.isProviderFlow(msg.also) ? PS.siteOfUrl(msg.also) : null;
+    if (site) navWatch.set(tabId, { until: Date.now() + WATCH_MS, sites: new Set([site, also].filter(Boolean)) });
   } else if (msg.type === 'frameOverlay') {
     // The top frame saw a click go into a large, near-invisible frame.
     if (sender.frameId === 0) frameOverlayAt.set(tabId, Date.now());
@@ -224,7 +241,7 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
   try { src = await chrome.tabs.get(d.sourceTabId); } catch { return; }
   const site = sourceSite(src.url || src.pendingUrl || '');
   if (site === undefined) return;
-  if ((await PS.getMode(site)) === 'off') return;
+  if ((await PS.getMode(site, !!src.incognito)) === 'off') return;
   let tok = takeToken(d.sourceTabId, d.url, site);
   if (!tok) { await sleep(GRACE); tok = takeToken(d.sourceTabId, d.url, site); }
   if (tok) {
@@ -234,6 +251,7 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
     if (tok.weak || tok.sameSiteOnly) {
       const allowed = new Set([site, PS.siteOfUrl(tok.url || '') || site].filter(Boolean));
       tabWatch.set(d.tabId, { until: Date.now() + WATCH_MS, allowed, sourceTabId: d.sourceTabId });
+      if (tok.weak) weakTabs.add(d.tabId);
     }
     return;
   }
@@ -253,9 +271,10 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
 chrome.webNavigation.onCommitted.addListener((d) => {
   if (d.frameId !== 0) return;
   const now = Date.now();
+  const hop = isRedirectHop(d);
   const tw = tabWatch.get(d.tabId);
   if (tw) {
-    if (now > tw.until) tabWatch.delete(d.tabId);
+    if (now > tw.until || !hop) tabWatch.delete(d.tabId);
     else if (!landingOk(d.url, tw.allowed)) {
       tabWatch.delete(d.tabId);
       chrome.tabs.remove(d.tabId).catch(() => {});
@@ -266,16 +285,21 @@ chrome.webNavigation.onCommitted.addListener((d) => {
   const nw = navWatch.get(d.tabId);
   if (nw) {
     navWatch.delete(d.tabId);
-    if (now <= nw.until && !landingOk(d.url, new Set([nw.site]))) {
+    if (now <= nw.until && hop && !landingOk(d.url, nw.sites)) {
       restoring.add(d.tabId);
       chrome.tabs.goBack(d.tabId).catch(() => { restoring.delete(d.tabId); });
       logBlocked(d.tabId, { kind: 'redirect', reason: 'redirect-chain', url: clamp(d.url, 2000) });
       return;
     }
-    // Still on the same site (e.g. a client-side hop): keep following.
-    if (now <= nw.until && PS.siteOfUrl(d.url) === nw.site) navWatch.set(d.tabId, nw);
+    // Still on an allowed site (e.g. a client-side hop): keep following.
+    if (now <= nw.until && nw.sites.has(PS.siteOfUrl(d.url))) navWatch.set(d.tabId, nw);
   }
   if (restoring.has(d.tabId)) { restoring.delete(d.tabId); return; }
+  // The user went somewhere themselves (typed a URL, used a bookmark or the
+  // address bar): the "opened a tab" memory is over. Script navigations are
+  // not labelled as redirects by Chrome, so they don't clear it.
+  if (['typed', 'auto_bookmark', 'generated', 'keyword', 'keyword_generated'].includes(d.transitionType) ||
+      (d.transitionQualifiers || []).includes('from_address_bar')) newTabAt.delete(d.tabId);
   if (d.transitionType !== 'reload') clearTab(d.tabId);
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -284,6 +308,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   tabWatch.delete(tabId);
   navWatch.delete(tabId);
   newTabAt.delete(tabId);
+  weakTabs.delete(tabId);
   restoring.delete(tabId);
   for (const k of buckets.keys()) if (k.startsWith(tabId + '|')) buckets.delete(k);
   clearTab(tabId);

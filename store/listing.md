@@ -48,6 +48,8 @@ WHAT IT BLOCKS
 - Popups and popunders opened by page-wide click hooks
 - Invisible full-page ad layers and ad images stacked over buttons
 - Tab-under and click-hijack redirects that replace the page you were on
+- Redirect chains that bounce through the site's own pages on to an ad
+- Links whose address a script swaps while you click (you get the page you clicked, not the ad)
 - Popups sent to an ad site before you have used them
 - Fake clicks on hidden links and forms
 - Picture-in-Picture windows opened by ad scripts
@@ -62,8 +64,8 @@ WHAT KEEPS WORKING
 - Downloads, normal navigation and page reloads
 
 THREE MODES, PER SITE
-- Smart (default): blocks what ad scripts trigger, allows what you click.
-- Strict: no script may open a tab on that site. Links you click still work.
+- Smart (default, the everyday setting): blocks what ad scripts trigger, allows what you click. To keep checkouts and bank confirmations working, a redirect that happens more than a few seconds after your click is allowed.
+- Strict (maximum protection): no script may open a tab on that site, and once you have used the page no script may send it to another site, however long it waits. Links you click still work.
 - Off: PopShield does nothing on that site.
 Embedded players from other domains follow the mode of the page they are on.
 
@@ -92,6 +94,7 @@ Ad tabs and redirects can come from any website and from embedded frames such as
 KNOWN LIMITATIONS
 - PopShield is not a content blocker. Ads that are ordinary links styled as the site's own buttons, and fake dialogs inside the page, are not removed. Use a content blocker alongside it.
 - Buttons that wait and then open an unrelated third-party site, or open a tab from a delayed timer, are blocked in Smart mode. Use Open in the popup, or set that site to Off.
+- In Smart mode, an ad script that waits more than a few seconds after your click before redirecting the page can get through; this keeps payment pages working. Use Strict on sites you don't trust.
 - If a cross-site video player tries to take over the whole tab, Chrome may show a "Leave site?" prompt. Click Cancel to stay on the page.
 ```
 
@@ -150,7 +153,7 @@ Saves the user's mode choices (Smart, Strict or Off, as a default and for sites 
 **webNavigation**
 
 ```
-PopShield uses webNavigation.onCreatedNavigationTarget to detect when a page opens a new tab or window, so it can immediately close tabs the page opened without the user's click (the main defence against popunders that bypass the in-page checks). It uses webNavigation.onCommitted to reset the per-tab blocked list when the tab loads a new page. No navigation data is stored beyond that per-tab list, which lives only in memory for that tab, and nothing is transmitted.
+PopShield uses webNavigation.onCreatedNavigationTarget to detect when a page opens a new tab or window, so it can immediately close tabs the page opened without the user's click (the main defence against popunders that bypass the in-page checks). It uses webNavigation.onCommitted to reset the per-tab blocked list when the tab loads a new page, and, for up to 8 seconds after a doubtful approval, to check whether a tab was bounced on to an unrelated site, so it can close that tab or send it back. No navigation data is stored beyond that per-tab list, which lives only in memory for that tab; the short-lived checks are kept in memory only and never saved. Nothing is transmitted.
 ```
 
 **Host permission: `<all_urls>`** (used by the content scripts and to read the tab's site in the popup)

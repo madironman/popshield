@@ -7,7 +7,7 @@
 <a href="https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3"><img alt="Manifest V3" src="https://img.shields.io/badge/Manifest-V3-1a73e8?style=flat-square&logo=googlechrome&logoColor=white"></a>
 <img alt="Chrome 119+" src="https://img.shields.io/badge/Chrome-119%2B-1a73e8?style=flat-square&logo=googlechrome&logoColor=white">
 <a href="https://github.com/madironman/popshield/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/madironman/popshield/ci.yml?branch=main&style=flat-square&label=CI"></a>
-<img alt="Tests: 60+ e2e scenarios" src="https://img.shields.io/badge/tests-60%2B%20e2e%20scenarios-2ea44f?style=flat-square">
+<img alt="Tests: 223 e2e checks" src="https://img.shields.io/badge/tests-223%20e2e%20checks-2ea44f?style=flat-square">
 <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-2ea44f?style=flat-square">
 <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
 
@@ -40,13 +40,13 @@ PopShield looks at **where the click was handled**, not only *whether* there was
 <td width="50%" valign="top">
 
 **🛡️ Intent-based blocking**<br>
-Blocks popups and popunders fired from page-wide click hooks (including wrappers that cover most of the page), invisible overlays and max z-index ad layers. Share buttons, `target="_blank"` links, ctrl / middle-click and "Open link in new tab" keep working.
+Blocks popups and popunders fired from page-wide click hooks (including wrappers that cover a large part of the page), invisible overlays (judged by what they actually paint) and max z-index ad layers. Share buttons, `target="_blank"` links, ctrl / middle-click and "Open link in new tab" keep working.
 
 </td>
 <td width="50%" valign="top">
 
 **↪️ Redirect, tab-under and hijack guards**<br>
-Stops cross-site redirects of the current tab driven by ad click hooks or fired right after a click, tab-unders ("open this page in a new tab, send this tab to an ad"), popups sent to another site before you use them, and hijacks from an embedded video player frame.
+Stops cross-site redirects of the current tab driven by ad click hooks or fired right after a click, tab-unders ("open this page in a new tab, send this tab to an ad"), popups sent to another site before you use them, and hijacks from an embedded video player frame. Same-site redirectors that bounce on to an ad are followed and undone.
 
 </td>
 </tr>
@@ -131,31 +131,42 @@ PopShield puts small hooks into the page's own JavaScript world, in every frame,
 |---|---|---|
 | **1. Real gesture** | no trusted user action is in progress (timers, async callbacks) | not caused by your click |
 | **2. Full click** | the open fires on mouse-down or pointer-down instead of a full click | fired on mouse-down, not a real click |
-| **3. On an element** | the listener is on `window`, `document`, `<html>`, `<body>`, a shadow root, or a wrapper element covering **at least half the viewport**: a page-wide hook | opened by a page-wide click hook |
-| **4. Real target** | the click landed on an **invisible overlay** (a positioned element covering ≥ 35% of the screen that is nearly transparent, counting the opacity of its ancestors, and shows no visible content) | click landed on an invisible overlay |
+| **3. On an element** | the listener is on `window`, `document`, `<html>`, `<body>`, a shadow root, a wrapper element covering **at least 40% of the viewport**, or an element that wasn't on the click's path at all: a page-wide hook | opened by a page-wide click hook |
+| **4. Real target** | the click landed on an **invisible overlay**: an element covering ≥ 35% of the screen that paints nothing you can see, however it was stacked on top | click landed on an invisible overlay |
 | | …or on an **ad layer**: a visible element at near-maximum z-index (≥ 2147480000), positioned fixed/absolute, covering ≥ 25% of the viewport, where the click hit an image or blank area rather than a button, link or input | click landed on an ad layer stacked over the page |
+
+Checks 3 and 4 measure the page **the moment your click arrives** (as you release the button), before any page code has run for it. The pointer-up, mouse-up and click events of one physical click share that one snapshot, so an ad can't shrink its wrapper or pull its overlay away in between and then ask.
+
+**What "invisible" means.** PopShield looks at what the element actually paints. It counts as invisible when its effective opacity (multiplied up the ancestor chain, including `filter: opacity()`) is below 0.2, or when nothing inside it is visible: no text with a visible colour (transparent `color` and `-webkit-text-fill-color` both count as invisible), no background colour or picture that shows (a gradient made only of transparent colour stops counts as empty), and no picture, video or canvas taking up a real share of it. How it got on top doesn't matter: `position: fixed`, a grid cell, negative margins or a transform are all treated the same. When the element under your pointer sits inside a closed shadow root, PopShield looks inside it with `chrome.dom.openOrClosedShadowRoot`.
 
 <details>
 <summary><b>Refinements that keep legitimate sites working</b></summary>
 
 <br>
 
-- **Framework delegation.** React ≤16 runs click handlers from one listener on `document`, React 17+ from the root container, Solid from `document` (`$$click`), and jQuery's `$(document).on('click', '.btn', fn)` the same way. During each click, PopShield wraps the handler that belongs to the clicked element, and an open made inside it counts as element-scoped. jQuery only gets this for a real jQuery and specific selectors (containing `.`, `#` or `[`, not matching `<body>`, at most 50 matches); a catch-all such as `*` doesn't.
-- **Opens after `await`.** V8 async stack traces keep the listener's receiver across `await`, for example `at async HTMLButtonElement.<anonymous>`. An open from an element's (or framework) handler after `await` is allowed while the user activation lasts, **but only to the same site or a built-in list of sign-in and payment providers** (Google, Apple, Microsoft, GitHub, PayPal, Stripe and others; `ASYNC_OK` in [`src/bridge.js`](src/bridge.js)). If the page tampers with stack formatting, the hint is ignored.
+- **Framework delegation.** React ≤16 runs click handlers from one listener on `document`, React 17+ from the root container, Solid from `document` (`$$click`), and jQuery's `$(document).on('click', '.btn', fn)` the same way. During each click, PopShield wraps the handler that belongs to the clicked element, and an open made inside it counts as element-scoped. React props only count if they were already on the element when you pressed, so props a page plants from its own press handler are ignored. jQuery only gets this for a real jQuery and specific selectors (containing `.`, `#` or `[`, not matching `<body>`, at most 50 matches); a catch-all such as `*` doesn't.
+- **Opens after `await`.** V8 async stack traces keep the listener's receiver across `await`, for example `at async HTMLButtonElement.<anonymous>`. An open after `await` is allowed when the element's (or framework's) handler is the bottom of the resumed stack, your click was less than 5 s ago and landed on a real target, **and the address is on the same site or is a sign-in or payment page of a known provider** (Google, Apple, Microsoft, GitHub, PayPal, Stripe and others; `PROVIDERS` in [`src/common.js`](src/common.js)). "Sign-in or payment page" means the address looks like one (a path such as `/oauth`, `/login`, `/checkout` or `/pay`, or OAuth parameters such as `client_id`), so a provider's open redirector doesn't qualify. If the page tampers with stack formatting, the hint is ignored. Because this rests on a hint the page could influence, the background follows the new tab for 8 s and closes it if it lands on an unrelated site.
 - **Legitimate max z-index UI.** The ad-layer check only applies when the click hit non-interactive content, so buttons inside cookie banners and modals stacked at the maximum z-index still work.
-- **Links you click.** A `_blank` link, ctrl / middle-click and right-click "Open link in new tab" on a real, visible link get an allow token for that link's address. A decoy `#` link's new tab must stay on the same site, and a modifier-click where PopShield sees no link allows only a same-site tab.
-- **Same-site and on-load redirects** are never touched. Neither are reloads, back/forward, downloads, link clicks or URLs you type.
+- **Links you click.** A `_blank` link, ctrl / middle-click and right-click "Open link in new tab" on a real, visible link get an allow token for **exactly that page** (origin and path). If a script swaps the link's address during your click, the ad tab is closed and the page you actually clicked is opened instead. A decoy `#` link's new tab must stay on the same site, and a modifier-click where PopShield sees no link allows only a same-site tab.
+- **Forms you submit.** A `target="_blank"` form submitted natively counts only when it happens in the same task as your click on a visible submit button of that form, or your Enter inside it.
+- **Same-site and on-load redirects** are left alone (a same-site hop right after a suspicious click is followed, see below). Reloads, back/forward, downloads, link clicks and URLs you type are never touched.
 
 </details>
 
-### Redirects (Smart mode)
+### Redirects of the tab you're on
 
 In the top frame, the Navigation API guard cancels cross-site, script-driven navigations of the current tab when:
 
-- **Click hijack.** It happens during user activation but doesn't come from an element-scoped handler (page-wide hook, overlay, ad layer, mouse-down), or it is a timer / `<meta refresh>` redirect right after a click. Redirects to the sign-in and payment providers are exempt from the timer rule.
-- **Tab-under.** A script opened a new tab and the page then tries to send this tab elsewhere. This stays blocked **until your next real click**. Opening this same page (any `?query`) in a new tab is blocked too.
+- **Click hijack.** It happens within 5 s of a click but doesn't come from an element-scoped handler (page-wide hook, overlay, ad layer, mouse-down), or it is a timer / `<meta refresh>` redirect right after a click.
+- **Tab-under.** This tab opened a new tab in the last 60 s and you haven't pressed anything since (a press within half a second is the same click). The worker remembers the opened tab per tab, so hopping to another page of the same site doesn't reset it. Opening this same page (any `?query`) in a new tab during a click is blocked too.
 - **Popup hijack.** A popup that hasn't received any click yet is sent to another site.
-- **Embedded-frame hijack.** You clicked inside a child frame (such as a video player) less than 4 seconds ago and haven't clicked on the main page since. A cross-site frame doing `top.location = ad` can't be cancelled silently, so PopShield holds the page and Chrome asks **"Leave site?"**.
+- **Embedded-frame hijack.** You clicked inside a child frame (such as a video player) less than 6 seconds ago, haven't clicked on the main page since, and the page still has focus. A cross-site frame doing `top.location = ad` can't be cancelled silently, so PopShield holds the page and Chrome asks **"Leave site?"**.
+
+Sign-in and payment pages of the known providers are exempt from all of these. A suspicious navigation to **the same site** isn't cancelled, because sites hop between their own pages all the time, but the worker follows the tab for 8 s: if it ends up on an unrelated site (a same-site redirector bouncing to an ad), the tab is sent back.
+
+### Smart or Strict: the one trade-off
+
+Smart mode lets a script move the tab to another site **more than about 5 seconds after your last click**, as long as none of the rules above applies. That keeps checkouts and bank hand-offs working, which often redirect after a wait. The price is that an ad script patient enough to wait out that window gets through in Smart. **Strict** closes the gap: once you have interacted with a page, no script may send the tab to another site on its own, however long it waits (sign-in and payment pages excepted). Use Smart as the everyday setting and Strict for sites you don't trust.
 
 ### Architecture
 
@@ -182,8 +193,8 @@ flowchart LR
 
 1. **`inject.js` (page's MAIN world) only hooks.** It wraps the APIs that open tabs (`window.open`, `click()` on links, `dispatchEvent(click)` on HTML and SVG links, `form.submit()`, Document Picture-in-Picture) and synchronously asks the bridge for a verdict over a private channel. The channel's 128-bit nonce is exchanged once at `document_start`, before any page script runs, and never re-broadcast. All built-ins it uses are captured up front.
 2. **`bridge.js` (isolated world) decides.** Pages can't see or tamper with this world, so it judges with clean APIs, watches your clicks itself, and runs the redirect, embedded-frame and form-submit guards.
-3. **Only the bridge mints allow tokens**, each bound to the URL it is for. The background worker accepts them only from PopShield's own scripts, keeps them for 3 s (15 s for right-click "Open link in new tab"), at most 4 per tab.
-4. **The backstop** closes any new tab that arrives without a fitting token.
+3. **Only the bridge mints allow tokens**, each bound to the URL it is for: to the site for script opens, to the exact page for links you click. The background worker accepts them only from PopShield's own scripts, keeps them for 3 s (15 s for right-click "Open link in new tab"), at most 4 per tab.
+4. **The backstop** closes any new tab that arrives without a fitting token. When the decision rested on weaker evidence (a framework or `await` hint, a decoy link), it follows the new tab for 8 s and closes it if it lands on an unrelated site.
 
 So if a hostile page manages to subvert `inject.js`, the worst it gets is skipping the early block: the backstop still closes any tab the bridge didn't approve. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
@@ -197,10 +208,11 @@ So if a hostile page manages to subvert `inject.js`, the worst it gets is skippi
 | Fresh-iframe patching | page world | grabbing an unhooked `window.open` from a new iframe |
 | Verdict and token minting | isolated world (`bridge.js`) | everything above; the page can't forge an approval |
 | Overlay-click guard | isolated world, capturing listener on `window` | invisible full-page `<a target=_blank>` ad layers, decoy links in pinned ad boxes |
-| Native form-submit guard | isolated world | `_blank` forms submitted by `requestSubmit()` or a scripted submit-button click |
-| Redirect guard (Navigation API) | isolated world, top frame | click-hijack, timer-after-click, tab-under and popup-hijack redirects |
+| Native form-submit guard | isolated world | `_blank` forms submitted by `requestSubmit()`, a scripted submit-button click, or anything other than your own click / Enter in that task |
+| Redirect guard (Navigation API) | isolated world, top frame | click-hijack, timer-after-click, tab-under and popup-hijack redirects; in Strict, any script redirect to another site after you've interacted |
 | Frame-hijack guard (`beforeunload`) | isolated world, top frame | a cross-site player iframe doing `top.location = ad` right after you click in it (Chrome asks "Leave site?") |
-| Backstop | background worker (`webNavigation.onCreatedNavigationTarget`) | any new tab the bridge didn't approve is closed |
+| Backstop | background worker (`webNavigation.onCreatedNavigationTarget`) | any new tab the bridge didn't approve is closed; a tab opened from a link whose address a script swapped is replaced by the page you clicked |
+| Redirect-chain follower | background worker (`webNavigation.onCommitted`) | a weakly-approved new tab, or a same-site hop, that bounces on to an unrelated site within 8 s |
 
 ### Modes
 
@@ -208,8 +220,8 @@ Set per site from the toolbar popup. A default for all other sites is at the bot
 
 | Mode | What it does |
 |---|---|
-| **Smart** *(default)* | The rules above. Blocks tabs, popups and redirects that ad scripts trigger; new tabs you open yourself still work. |
-| **Strict** | No script may open a tab at all. Links you click yourself, ctrl / middle-click, "Open link in new tab" and forms you submit still work. |
+| **Smart** *(default, the normal setting)* | The rules above. Blocks tabs, popups and redirects that ad scripts trigger; new tabs you open yourself still work. A script redirect more than ~5 s after your last click is allowed, so checkouts and bank hand-offs keep working. |
+| **Strict** *(maximum protection)* | No script may open a tab at all, and once you've interacted with the page no script may send the tab to another site, however long it waits (sign-in and payment pages excepted). Links you click yourself, ctrl / middle-click, "Open link in new tab" and forms you submit still work. |
 | **Off** | PopShield does nothing on the site. |
 
 Embedded frames, such as a video player from another domain, follow the mode of the page that contains them.
@@ -236,6 +248,7 @@ No false positives: legitimate `target=_blank` torrent download links, same-site
 
 - **Only an anonymous counter is kept.** `chrome.storage.local` holds the total number of blocks, the count per day (last 30 days) and the count per kind of block, plus the date counting started. No site, URL or page address is ever part of it. **Reset stats** in the popup clears it.
 - **The per-page list stays in the tab.** What was blocked on a page (up to 50 items, with the blocked address and the page's address without query string) lives in `chrome.storage.session` under that tab only. It is wiped when the tab navigates to a new page or closes, and when the browser exits.
+- **Working memory is short-lived.** To follow a redirect chain or match a new tab to your click, the background worker holds the address or site involved for a few seconds (up to 15 s for a right-click "Open link in new tab"), plus a timestamp of when each tab last opened a tab. This lives only in the worker's memory, is never written to storage, and is dropped when the tab closes or the worker stops.
 - **Your settings.** The default mode and the per-site modes *you chose* (for example `example.com → Strict`) are stored in `chrome.storage.local`. A site appears there only if you set a mode for it.
 - **No telemetry, no analytics, no network requests, no remote code, no remote lists.** PopShield never contacts any server. All decisions are made locally.
 - **Reports are yours to send.** The Report buttons only open a pre-filled public GitHub issue in a new tab. Nothing is sent unless you submit that form yourself.
@@ -266,7 +279,7 @@ PopShield assumes the page is hostile: ad scripts can install listeners anywhere
 - **Private channel.** The 128-bit nonce is exchanged once at `document_start`, before any page script exists, and never re-broadcast.
 - **Defence in depth.** If a page subverts `inject.js`, the worst it gets is skipping the early block; the backstop still closes any tab the bridge didn't approve.
 - **A strict worker.** `background.js` trusts only messages from PopShield's own scripts, whitelists the kinds and reasons in the log, rate-limits per tab, takes the frame address from Chrome (`sender.url`, origin and path only), and binds, caps and expires tokens.
-- **Residual risk.** A page that fakes React props (or another framework's handler) on the element you click, specifically to fool PopShield, can still get the framework exemption. The bridge then approves the open, so the backstop doesn't help there.
+- **Residual risk.** A page that fakes framework data on the element you click, specifically to fool PopShield, can still get the framework exemption. For React this now has to be done before you press (props planted by the page's own press handler are ignored); Solid- and jQuery-shaped handlers aren't snapshotted. The bridge then approves the open. Because that approval rests on a hint, the worker follows the new tab and closes it if it bounces on to a site other than the page's or the approved address's, but an open straight to the ad's own address still gets through.
 
 Threat model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#threat-model). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
@@ -299,11 +312,12 @@ If a description above is wrong or outdated, please [open an issue](https://gith
 
 - **Ads disguised as real links.** An ad that is a plain `<a href=ad target=_blank>` styled as the site's own button (for example a fake "Direct Download" button), which you really click, is out of scope. Catching it needs a list of ad domains: pair PopShield with a content blocker such as uBlock Origin.
 - **Fake in-page dialogs and ads aren't hidden.** PopShield stops tabs and redirects; it doesn't remove page content.
-- **Framework spoofing.** A page that fakes React props (or Solid / jQuery handlers) on the element you click, specifically to fool PopShield, can get the framework exemption. The backstop doesn't help there, because the bridge does approve.
-- **Opens after `await` to arbitrary third-party sites** are blocked; only the same site and the built-in sign-in / payment providers pass. Opens scheduled with `setTimeout` or `.then()` are blocked too. Use **Open** in the popup, or set the site to Off.
-- **Cross-site script redirects right after a click** (for example a timer that sends you to a partner site) are blocked in Smart, unless they go to a sign-in or payment provider.
-- **Delegation on a full-page container.** A plain listener on a wrapper that covers most of the page and opens windows is treated as page-wide unless it belongs to a recognised framework (React, Solid, jQuery).
-- **Player-iframe hijacks still show "Leave site?".** A cross-site frame doing `top.location = ad` can't be cancelled silently. Click **Cancel** to stay. The prompt only appears within 4 s of a click inside the frame and not after a click on the main page; reloading or typing a URL is never interrupted.
+- **Framework spoofing.** A page that fakes framework data on the element you click, specifically to fool PopShield, can get the framework exemption. React props must already be there when you press, so this takes planning ahead; an open straight to the ad's address then gets through, because the bridge does approve.
+- **Smart mode allows patient redirects.** A script that waits more than about 5 seconds after your last click and then sends the tab to another site is allowed in Smart, so that payment pages handing off to a bank keep working. Strict blocks it. This is a deliberate trade-off, and the test suite reports it as an accepted known bypass rather than hiding it.
+- **Opens after `await` to arbitrary third-party sites** are blocked; only the same site and sign-in / payment pages of the known providers pass. Opens scheduled with `setTimeout` or `.then()` are blocked too. Use **Open** in the popup, or set the site to Off.
+- **Cross-site script redirects right after a click** (for example a timer that sends you to a partner site) are blocked, unless they go to a sign-in or payment page. So is a cross-site script redirect within 60 s of the tab opening another tab, until you press something again.
+- **Delegation on a full-page container.** A plain listener on a wrapper that covers 40% or more of the page and opens windows is treated as page-wide unless it belongs to a recognised framework (React, Solid, jQuery).
+- **Player-iframe hijacks still show "Leave site?".** A cross-site frame doing `top.location = ad` can't be cancelled silently. Click **Cancel** to stay. The prompt only appears within 6 s of a click inside the frame, not after a click on the main page, and only while the page has focus; reloading or typing a URL is never interrupted.
 
 Found a site where ads get through, or where something legitimate is blocked? Use the **Report** buttons in the popup, or see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-a-site-where-ads-still-get-through).
 
@@ -319,7 +333,7 @@ npm test
 
 | Suite | What it does |
 |---|---|
-| `test/run.mjs` (e2e, 60+ scenarios) | Runs each attack scenario first **without** the extension, to record what Chrome alone does and prove the attack works, then **with** PopShield, checking that every attack is blocked, every legitimate pattern still works, and nothing else gets logged. |
+| `test/run.mjs` (e2e, 120 scenarios, 223 counted checks, about 50 s) | Runs each attack scenario first **without** the extension, to record what Chrome alone does and prove the attack works, then **with** PopShield, checking that every attack is blocked, every legitimate pattern still works, and nothing else gets logged. Both passes run at once in parallel browsers (`E2E_WORKERS` overrides the automatic count). |
 | `test/popup-ui.mjs` | Triggers real blocks, then checks the badge count, the blocked list, the mode buttons, per-site overrides, the Report link and the Open button. Saves light and dark screenshots to `test/screenshots/`. |
 
 <details>
@@ -329,9 +343,13 @@ npm test
 
 **Attacks (must be blocked):** popunders from `document` click, `window` mousedown and `<body>` pointerup hooks · a popunder on a page-sized wrapper element · invisible overlay links and overlay listeners · scripted `_blank` anchors (timer, `dispatchEvent`, SVG links) · scripted `_blank` form submits and submit-button clicks · pristine `window.open` from fresh iframes and `frames[i]` · tab-under and click-hijack redirects, `window.open(_self)` redirects · timer popups · popups and top-frame hijacks from a cross-site player iframe (including a second click later) · a jQuery `*` delegated popunder · a popunder on a React 16 site · page-wide hooks that open after `await` or in `.then()` · an element handler that opens a third-party site after `await` · a max z-index ad layer over a Continue button · a same-page tab-under from an element handler · decoy-link `href` swaps and ad-box frames · retry loops · the backstop closing a tab opened through an unhooked JS world.
 
+**Red-team regressions:** 58 scenarios written during three internal red-team rounds, each an attempt to get past PopShield: poisoned built-ins, forged stack traces and spoofed receivers, a leaked channel nonce, planted React props and fake jQuery, overlays hidden behind transparent text, transparent gradients, grid stacking, closed shadow roots or a parent's opacity, overlays and wrappers that change between press and click, near-invisible cross-site frames, scripted and keystroke-triggered form submits, tab-unders that wait, hop to another page of the same site or ride on a link you clicked, same-site redirectors, links whose address is swapped during the click, and hijacked popups. Several run in Strict mode too.
+
 **Legitimate patterns (must keep working):** button `window.open` · React root listeners, React 16 and 17+ (sync and after `await`) · jQuery delegated handlers · `_blank` links, ctrl- and middle-click, big image links, `#top` links, chat-widget links · scripted anchors from element handlers · downloads · same-site, on-load and link navigations · leaving or reloading the page after using the player · `_blank` forms via click and Enter · `window.open` after `await` · buttons in a max z-index consent modal.
 
-**Modes:** Off allows popunders and redirects, Strict blocks scripted popups while real links and ctrl+click still work, and a per-site Off override applies only to its site.
+**Modes:** Off allows popunders and redirects, Strict blocks scripted popups while real links, ctrl+click and links inside closed shadow roots still work, and a per-site Off override applies only to its site.
+
+**Known bypasses** are cases marked `knownBypass`: they still run and are reported (`OPEN` while PopShield doesn't stop them, `FIXD` once it does), but they don't fail the run. Only one remains: the patient redirect in Smart mode described under [Known limitations](#-known-limitations), which is an accepted trade-off; its Strict twin must and does pass.
 
 </details>
 
@@ -349,8 +367,8 @@ popshield/
 ├── src/
 │   ├── inject.js          # page (MAIN) world: API hooks only; asks the bridge, supplies two hints
 │   ├── bridge.js          # isolated world: verdicts, allow tokens, overlay/form/redirect/frame guards
-│   ├── common.js          # shared helpers: site parsing, per-site mode storage
-│   ├── background.js      # service worker: tokens, new-tab backstop, badge, per-tab log, local counter
+│   ├── common.js          # shared helpers: site parsing, per-site modes, sign-in/payment providers
+│   ├── background.js      # service worker: tokens, new-tab backstop, redirect-chain follower, badge, per-tab log, local counter
 │   ├── popup.html         # toolbar popup UI (light + dark)
 │   ├── popup.js           # counter + sparkline, per-site mode, blocked list, Report / Feedback
 │   └── welcome.html       # first-install welcome page

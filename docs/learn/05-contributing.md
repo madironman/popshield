@@ -68,6 +68,10 @@ command the project named "test", which starts the test programs.
 - `test/run.mjs`, the **end-to-end** suite. For every scenario it opens a test
   page in real Chromium, clicks like a person (with trusted events), and
   checks the outcome, first without PopShield (the baseline) and then with it.
+  There are 120 scenarios. Counting each baseline run and each PopShield run
+  as one check (mode-only cases have no baseline), that's 223 checks that
+  decide pass or fail, plus one known bypass that is only reported (below).
+  The run takes about 50 seconds because many browsers work in parallel.
 - `test/popup-ui.mjs`, which triggers real blocks and then checks the popup:
   the badge, the list, the mode buttons, a per-site setting, the Report link,
   the Open button. It also saves light and dark screenshots.
@@ -97,6 +101,16 @@ pass  doc-click-popunder  blocked: [popup/page-wide-listener]     <- with PopShi
 The `kind/reason` pair tells you which rule fired, which is the first thing
 to look at when a test fails.
 
+A few lines start with `OPEN` or `FIXD` instead of `pass` or `FAIL`. Those are
+**[known bypasses](glossary.md#known-bypass)**: attacks the project has
+decided not to block, kept in the suite so nobody forgets them. `OPEN` means
+PopShield still lets it through, as expected; `FIXD` means a change now blocks
+it, and the case's `knownBypass` flag should be removed. Neither fails the
+run. Today there is one: Smart mode's patient redirect (`rt-delayed-redirect`,
+see [Part IV](04-decisions.md#24-smart-and-strict-one-honest-trade-off)). The
+last line counts only the other checks: `223/223 checks passed` means all is
+well.
+
 `npm run test:live -- <address> [clicks]` does the same kind of before/after
 comparison on a real website. It needs an internet connection and isn't part
 of the automated checks.
@@ -124,7 +138,9 @@ in [Part II](02-extensions.md#2-popshields-manifest-line-by-line)).
 **[`src/common.js`](../../src/common.js)** is small and shared by the bridge,
 the worker and the popup. `siteOf()` turns a host name into a site (keeping
 three labels for endings like `co.uk`). `getMode()` returns the mode for a
-site: a per-site choice if you made one, otherwise your default.
+site: a per-site choice if you made one, otherwise your default. `PROVIDERS`
+is the sign-in and payment list, and `looksLikeAuthOrPay()` decides whether
+an address on one of them is a sign-in or payment page.
 
 **[`src/inject.js`](../../src/inject.js)** (page's world). From the top:
 
@@ -133,7 +149,8 @@ site: a per-site choice if you made one, otherwise your default.
    the bridge) and `ask()`;
 3. small link helpers (`isLink`, `linkHref`, `linkOpensNew`);
 4. the async hint, `asyncOrigin()`;
-5. framework recognition, `attributeFrameworks()` and `wrapHandler()`;
+5. framework recognition: `onPress()` (which React data existed when you
+   pressed), `attributeFrameworks()` and `wrapHandler()`;
 6. `patchRealm(win)`, which installs every hook in a window: `open`, `click`,
    `dispatchEvent`, `submit`, Picture-in-Picture, `document.open/write`, and
    the frame doors. It is called for the page's own window and for every new
@@ -149,22 +166,27 @@ PopShield. From the top:
 2. the private line (`onHello`, `onUp`, `down`);
 3. messages to the worker: `allow()` issues tickets, `block()` logs with rate
    limits;
-4. detectors: `isOverlay`, `isAdLayer`, `isPageWide`, `inAdBoxFrame`,
-   `isDeadHref`, `clickedLink`;
-5. `ASYNC_OK`, the sign-in and payment list;
-6. the gesture state and the verdict: `gestureVerdict()`, `asyncAllowed()`,
-   `judge()`, `handleAsk()`;
-7. `onGesture()`: records clicks, cancels overlay links, issues link tickets;
-8. `onSubmit()`: the form guard;
-9. top frame only: `frameJustClicked()`, the `navigate` listener (redirect
-   guard) and `onBeforeUnload()` (player hijack).
+4. detectors: `targetOf`, `effectiveOpacity`, `hasVisiblePaint`,
+   `isOverlay`, `isAdLayer`, `isPageWide`, `inAdBoxFrame`, `isDeadHref`,
+   `clickedLink`, `providerFlow`;
+5. the gesture state, the snapshot and the verdict: `snapshotFor()`,
+   `gestureVerdict()`, `asyncAllowed()`, `judge()`, `handleAsk()`;
+6. `onGesture()`: records clicks and presses, takes the snapshot, cancels
+   overlay links, issues link tickets;
+7. `onSubmit()`: the form guard (same-task rule);
+8. top frame only: `frameJustClicked()`, the `tabState` question to the worker,
+   the `navigate` listener with `redirectReason()` (redirect guard) and
+   `onBeforeUnload()` (player hijack).
 
 **[`src/background.js`](../../src/background.js)** (service worker):
 constants (ticket lifetimes, limits), the whitelists of kinds and reasons,
-rate limits, tickets (`addToken`, `tokenFits`, `takeToken`), the anonymous
-counter (`bumpStats`), the per-tab list (`logBlocked`, `clearTab`), the
-message handler, the backstop (`onCreatedNavigationTarget`), cleanup when a
-tab navigates or closes, and the welcome page on install.
+rate limits, tickets (`addToken`, `tokenFits`, `takeToken`,
+`takeSwappedLink`), the redirect-chain follower's state (`tabWatch`,
+`navWatch`, `landingOk`) and the per-tab "opened a tab at" memory
+(`newTabAt`), the per-tab list (`logBlocked`, `flushLog`, `clearTab`), the
+anonymous counter (`bumpStatsMany`), the message handler, the backstop
+(`onCreatedNavigationTarget`), the chain follower and cleanup
+(`onCommitted`), cleanup when a tab closes, and the welcome page on install.
 
 **[`src/popup.js`](../../src/popup.js)**: the counter and bar chart, Reset
 stats, the mode buttons, the list with Open buttons, and the Report and
@@ -300,6 +322,20 @@ For each scenario, predict the `kind/reason` PopShield logs, then check with
   before any tab-under rule is reached. Try `element-tab-under` (a button's
   own handler opens the tab, then redirects) to see the `tab-under` reason.
 
+Two more, a little harder: `rt-link-href-swap-redirector` and
+`rt-redirector-navigation`.
+
+<details><summary>Answers</summary>
+
+- `rt-link-href-swap-redirector`: `new-tab/link-swapped`. Your link ticket
+  names the exact article; the tab opens at the swapped redirector address,
+  so the worker closes it and opens the article instead.
+- `rt-redirector-navigation`: `redirect/redirect-chain`. The move to the
+  same-site redirector is let through, but followed; when the tab lands on
+  the ad site, the worker sends it back.
+
+</details>
+
 </details>
 
 ### Find a limitation
@@ -324,19 +360,21 @@ limitation.
 
 <details><summary>Answer</summary>
 
-The timer runs after the click is over, and its stack trace doesn't name the
-button, so the hint is "no" and the bridge blocks it. With `await`, the stack
-names `HTMLButtonElement`, the click was under 5 seconds ago, and the address
-is on the same site: allowed. With `await` but an ad address, the bridge still
-blocks it, because after `await` only the same site or a sign-in/payment
-provider is allowed.
+The timer runs after the click is over, and the bottom of its stack trace is
+the timer's own function, not the button's listener, so the hint is "no" and
+the bridge blocks it. With `await`, the resumed button listener is the bottom
+of the stack (`HTMLButtonElement`), the click was under 5 seconds ago, and the
+address is on the same site: allowed, with a weak ticket. With `await` but an
+ad address, the bridge still blocks it, because after `await` only the same
+site or a provider's sign-in or payment page is allowed.
 
 </details>
 
 ### Break it on purpose
 
-In `gestureVerdict()` in `src/bridge.js`, temporarily remove the `isAdLayer`
-line and run `npm run test:e2e -- ad-layer`. The `ad-layer-tab-under` case
+In `snapshotFor()` in `src/bridge.js`, temporarily remove the
+`isAdLayer(t) ? 'ad-layer' :` part of the line that sets `target`, and run
+`npm run test:e2e -- ad-layer`. The `ad-layer-tab-under` case
 should fail. Which other rule still catches part of the attack? (Hint: the
 popup is of this same page.) Put the line back afterwards.
 

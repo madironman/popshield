@@ -99,6 +99,14 @@ you are clicking the ad.
 
 (`overlay-anchor`, `overlay-div-listener`)
 
+`position: fixed` isn't the only way to get on top. CSS grid can put two
+elements in the same cell, one over the other, and negative margins or a
+transform can do the same. And `opacity: 0` isn't the only way to be
+invisible: text can be painted in a transparent colour, and a background can
+be a "gradient" made of transparent colours. Red teams tried all of these
+(`rt-grid-overlay-link`, `rt-overlay-transparent-text`,
+`rt-overlay-transparent-gradient`).
+
 ### The visible ad layer
 
 Not invisible this time: a big ad image placed on top of everything, right
@@ -161,6 +169,23 @@ link.addEventListener('click', (e) => {   // when the decoy link is clicked...
 A cousin of this: a blank iframe pinned over the page at the top z-index,
 filled with a fake "confirm you are not a robot" link (`adbox-frame`).
 
+### The swapped link
+
+The decoy's bigger sibling. This time the link is real: it points at a real
+article, and you really want it. A listener high up in the page waits for
+your click and changes the address at the last moment
+(`rt-link-href-swap-redirector`):
+
+```js
+document.addEventListener('click', (e) => {     // on any click anywhere...
+  const a = e.target.closest('a');              // ...find the link that was clicked, if any
+  if (a) a.href = '/go?to=' + AD;               // ...and point it somewhere else before the browser follows it
+});                                             // end of the listener
+```
+
+The new address is on the same site as the page, which makes it look
+harmless. It's a *redirector*, described below.
+
 ### Check your understanding
 
 1. Why does the ad's `document` listener fire when you click the Play button?
@@ -215,6 +240,32 @@ document.addEventListener('click', () => {   // on any click...
 });                                          // end of the listener
 ```
 
+### The tab-under that waits
+
+A tab-under doesn't have to happen in the same instant. The ad can wait for
+any new tab to leave yours, even one you opened yourself with a real link,
+and only then turn the tab you left behind into an ad
+(`rt-tabunder-after-user-link`). It can wait a few seconds so that "right
+after the click" is over (`rt-delayed-tab-under`). It can even move your tab
+to another page of the same site first, hoping a fresh page forgets what just
+happened, and redirect from there (`rt-tabunder-samesite-hop`).
+
+### The redirector bounce
+
+A **[redirector](glossary.md#redirector)** is a page whose only job is to
+forward you somewhere else. Many sites have one, for example
+`/go?to=<address>`, to count clicks on outgoing links. To a blocker that asks
+"is this move staying on the same site?", a redirector looks innocent: it
+*is* on the same site. A moment later, it forwards you to the ad
+(`rt-redirector-navigation`, `rt-async-forge-redirector`):
+
+```text
+ your tab:  [ site.example/watch ] ──script──► [ site.example/go?to=AD ] ──forwards──► [ AD ]
+                                                ▲ same site: looks harmless
+```
+
+The same bounce works on a new tab.
+
 ### The popup hijack
 
 You click "Sign in with ...", and a small sign-in popup opens, as it should.
@@ -241,12 +292,16 @@ document.addEventListener('click', () => {   // on any click inside the player..
 
 1. In a tab-under, which tab ends up showing the ad?
 2. Why can the player frame redirect the whole tab?
+3. Why does a redirector on the same site fool a rule that only asks "is this
+   move staying on the same site?"
 
 <details><summary>Answers</summary>
 
 1. The original tab, which is now behind the copy of your page.
 2. A frame is allowed to navigate the top frame, even across sites, so the
    player's script can send the whole tab elsewhere.
+3. The rule only looks at the first address. The redirector's address is on
+   the same site, so it passes; the forward to the ad happens afterwards.
 
 </details>
 
