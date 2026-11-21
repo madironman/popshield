@@ -1,0 +1,30 @@
+{
+  "name": "popshield",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension that helps stop sites from opening ad tabs, popups, popunders and redirect hijacks.",
+  "license": "MIT",
+  "author": "Madhevan Ramalingam (https://github.com/madironman)",
+  "homepage": "https://github.com/madironman/popshield#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/madironman/popshield.git"
+  },
+  "bugs": {
+    "url": "https://github.com/madironman/popshield/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test/run.mjs && node test/popup-ui.mjs",
+    "test:e2e": "node test/run.mjs",
+    "test:ui": "node test/popup-ui.mjs",
+    "package": "node scripts/package.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
+    "version:check": "node scripts/check-version.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.49.1"
+  }
+}

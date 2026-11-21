@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Test output
+test/screenshots/
+test-results/
+playwright-report/
+
+# Packaging
+dist/
+*.zip
+
+# OS clutter
+.DS_Store
+store/image-src/raw/

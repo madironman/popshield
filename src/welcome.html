@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome to PopShield</title>
+<style>
+  :root {
+    --bg: #f6f8fb; --card: #ffffff; --fg: #1f2328; --muted: #5d6670; --line: #dde3ea;
+    --accent: #1a73e8; --accent-soft: #e8f0fe; --ok: #188038; --bad: #d93025;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17191c; --card: #202327; --fg: #e8eaed; --muted: #9aa0a6; --line: #34383d;
+            --accent: #8ab4f8; --accent-soft: #1f2a3a; --ok: #81c995; --bad: #f28b82; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 48px 20px 64px; }
+  .hero { display: flex; gap: 20px; align-items: center; margin-bottom: 36px; }
+  .hero img { width: 84px; height: 84px; flex: none; }
+  h1 { font-size: 34px; line-height: 1.15; margin: 0 0 6px; }
+  .lead { color: var(--muted); font-size: 18px; margin: 0; }
+  h2 { font-size: 20px; margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .yes { color: var(--ok); } .no { color: var(--bad); }
+  ol { margin: 0; padding-left: 20px; } ol li { margin: 4px 0; }
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .mode { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--bg); }
+  .mode b { color: var(--accent); }
+  .section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; margin-bottom: 20px; }
+  .privacy { background: var(--accent-soft); border-color: transparent; }
+  a { color: var(--accent); }
+  .links { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 26px; font-size: 15px; }
+  kbd { font: 13px ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+  .legal { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 28px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <img src="../icons/128.png" alt="">
+    <div>
+      <h1>PopShield is on</h1>
+      <p class="lead">Ad tabs, popunders and redirect hijacks are now being blocked. Tabs you open yourself keep working.</p>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3><span class="no">✕</span> Blocked</h3><p>Ad tabs that open when you click a button or anywhere on a page, popunders, invisible ad layers, and tricks that send your tab to an ad.</p></div>
+    <div class="card"><h3><span class="yes">✓</span> Still works</h3><p>Links you click, ctrl- and middle-click, “Open link in new tab”, share and sign-in buttons, downloads. A button that waits a moment before opening a window works for the same site and for sign-in and payment pages.</p></div>
+    <div class="card"><h3>How it decides</h3><p>A site may open a new tab only when your click was really meant for the thing you clicked — not for a hidden ad hook on the whole page.</p></div>
+  </div>
+
+  <div class="section">
+    <h2>Pin PopShield to your toolbar</h2>
+    <ol>
+      <li>Click the puzzle-piece <b>Extensions</b> icon at the top right of Chrome.</li>
+      <li>Click the pin next to <b>PopShield</b>.</li>
+      <li>The badge on the shield shows how many things were blocked on the current page. Click it to see the list, open anything you actually wanted, or report a site.</li>
+    </ol>
+  </div>
+
+  <div class="section">
+    <h2>Three modes, per site</h2>
+    <div class="modes">
+      <div class="mode"><b>Smart</b> (default)<br>Blocks what ad scripts trigger; tabs you open yourself still work, and so do payment pages that redirect you to your bank a few seconds after you click.</div>
+      <div class="mode"><b>Strict</b><br>Maximum protection: no script may open a tab, and once you've used a page no script may send it to another site. Only links you click yourself can.</div>
+      <div class="mode"><b>Off</b><br>PopShield does nothing on that site.</div>
+    </div>
+  </div>
+
+  <div class="section privacy">
+    <h2>Your privacy</h2>
+    <p><b>PopShield keeps no browsing history.</b> The only site names it saves are the ones you choose a mode for; everything else is an anonymous count. The list of what was blocked on a page lives only in that tab and is cleared when you go to a new page or close the tab.</p>
+    <p>No telemetry, no tracking, no remote code. If you press a Report button, PopShield first shows what will be shared, then opens github.com with those details filled in: the page’s address (without the part after ? or #), your mode, version numbers and what was blocked. GitHub receives them when the tab opens; nothing becomes public unless you sign in and submit. The Report buttons are hidden in incognito windows.</p>
+  </div>
+
+  <div class="links">
+    <a href="https://github.com/madironman/popshield" target="_blank" rel="noopener">Source code on GitHub</a>
+    <a href="https://github.com/madironman/popshield/blob/main/docs/LEARN.md" target="_blank" rel="noopener">How it works</a>
+    <a href="https://github.com/madironman/popshield/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy policy</a>
+    <a href="https://github.com/madironman/popshield/issues/new/choose" target="_blank" rel="noopener">Report a problem</a>
+  </div>
+
+  <p class="legal">PopShield is an independent project, not affiliated with or endorsed by Google or any company named here. Google Chrome and Chromium are trademarks of Google LLC; other names belong to their owners and are used only to describe compatibility.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: Manifest and no-network policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: manifest.json is valid JSON (Manifest V3)
+        run: |
+          node -e '
+            const m = JSON.parse(require("fs").readFileSync("manifest.json", "utf8"));
+            if (m.manifest_version !== 3) { console.error("manifest_version must be 3"); process.exit(1); }
+            console.log(`manifest.json OK: ${m.name} ${m.version}`);
+          '
+
+      - name: Versions agree (manifest, package.json, lockfile, CHANGELOG)
+        run: node scripts/check-version.mjs
+
+      - name: No network APIs in src/
+        # PopShield makes no network requests. Comment lines are ignored so that
+        # code comments may still mention these APIs.
+        run: |
+          pattern='\bfetch\(|XMLHttpRequest|WebSocket|sendBeacon'
+          hits=$(grep -rnE "$pattern" src/ | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|/?\*)' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Network APIs are not allowed in src/ (see CONTRIBUTING.md):"
+            echo "$hits"
+            exit 1
+          fi
+          echo "No network APIs found in src/."
+
+  test:
+    name: E2E and popup UI tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tests
+        run: npm test
+
+      - name: Upload popup screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: popup-screenshots
+          path: test/screenshots/
+          if-no-files-found: ignore

@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>rt-frame</title>
+<style>html,body{margin:0;height:100%}</style></head>
+<body>
+<script>
+  // Cross-site frame for the red-team regression scenarios ("rt-" cases in scenario.js).
+  //   mode=fulldiv  full-size plain div whose click listener opens the ad
+  //   mode=button   full-size <button> whose click listener opens the ad
+  //   mode=link     full-size target=_blank link to the ad (white background)
+  const mode = new URLSearchParams(location.search).get('mode');
+  const AD = 'http://127.0.0.1:8712/ad.html';
+  const b = document.body;
+  if (mode === 'fulldiv') {
+    b.innerHTML = '<div id="c" style="width:100vw;height:100vh"></div>';
+    document.getElementById('c').addEventListener('click', () => window.open(AD + '?rt-xframe-div'));
+  } else if (mode === 'button') {
+    b.innerHTML = '<button id="c" style="width:100vw;height:100vh">x</button>';
+    document.getElementById('c').addEventListener('click', () => window.open(AD + '?rt-xframe-button'));
+  } else if (mode === 'link') {
+    b.style.background = '#fff';
+    b.innerHTML = '<a id="c" href="' + AD + '?rt-xframe-link" target="_blank" style="display:block;width:100vw;height:100vh"></a>';
+  }
+</script></body></html>

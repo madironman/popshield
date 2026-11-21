@@ -1,0 +1,57 @@
+name: Bug report
+description: PopShield is broken in some other way (popup UI, badge, settings, errors, page breakage).
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Issues are public and tied to your GitHub account. Don't post links to adult content or to sites offering content illegally; describe what the page did instead. Such links will be removed.**
+
+        For ads that still get through use the **Ad got through** form; for legitimate things that were blocked use **False positive**.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What went wrong, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Site URL (if site-specific)
+  - type: input
+    id: chrome-version
+    attributes:
+      label: Chrome version
+      description: From chrome://version
+    validations:
+      required: true
+  - type: input
+    id: popshield-version
+    attributes:
+      label: PopShield version
+      description: From chrome://extensions
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 / macOS 15 / Ubuntu 24.04
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors or logs
+      description: Errors from chrome://extensions ("Errors" button) or the page's DevTools console.
+      render: text

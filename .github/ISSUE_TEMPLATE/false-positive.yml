@@ -1,0 +1,72 @@
+name: False positive
+description: PopShield blocked a legitimate popup, link, form or redirect.
+title: "[False positive]: "
+labels: ["false-positive", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Issues are public and tied to your GitHub account. Don't post links to adult content or to sites offering content illegally; describe what the page did instead. Such links will be removed.**
+
+        Something you wanted to open was blocked. Tip: the toolbar popup lists blocked items with an **Open** button,
+        and you can set the site to **Off** as a workaround while this is fixed.
+  - type: input
+    id: url
+    attributes:
+      label: Site URL
+      description: The page where the legitimate action was blocked. If the link is one you shouldn't post (see the note above), write "not shared" and describe the page instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: PopShield mode on this site
+      options:
+        - Smart
+        - Strict
+    validations:
+      required: true
+  - type: dropdown
+    id: what-blocked
+    attributes:
+      label: What was blocked?
+      options:
+        - A button that opens a new tab or window (share, login, payment, ...)
+        - A link to a new tab
+        - A form that submits to a new tab
+        - A redirect / navigation in the current tab
+        - A download
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you click, and what did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: chrome-version
+    attributes:
+      label: Chrome version
+      description: From chrome://version
+    validations:
+      required: true
+  - type: input
+    id: popshield-version
+    attributes:
+      label: PopShield version
+      description: From chrome://extensions
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: blocked-log
+    attributes:
+      label: PopShield blocked log
+      description: Screenshot of the toolbar popup's blocked list for that tab (drag the image here).
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?

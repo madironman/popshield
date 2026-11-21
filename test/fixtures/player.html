@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>player</title>
+<style>body{margin:0;background:#000;height:100vh;position:relative}#ctrl{position:absolute;left:10px;bottom:10px}</style></head>
+<body><button id="ctrl">Play</button>
+<script>
+  // A fake embedded widget with one button, loaded as a cross-site frame by scenario.js.
+  // (The file name, ids and labels are historical test identifiers.)
+  const mode = new URLSearchParams(location.search).get('mode');
+  const AD = 'http://127.0.0.1:8712/ad.html';
+  document.getElementById('ctrl').addEventListener('click', () => { document.getElementById('ctrl').textContent = 'Pause'; });
+  document.addEventListener('click', () => {
+    if (mode === 'popup') window.open(AD + '?playerpopup');
+    if (mode === 'top') top.location.href = AD + '?playertop';
+    // Delayed hijack: ?mode=topdelay&ms=N navigates the top page N ms after the click.
+    if (mode === 'topdelay') setTimeout(() => { top.location.href = AD + '?playerdelay'; }, +(new URLSearchParams(location.search).get('ms') || 0));
+    // Hand focus back to the top page first, then hijack.
+    if (mode === 'topblur') { top.focus(); if (document.activeElement) document.activeElement.blur(); setTimeout(() => { top.location.href = AD + '?playerblur'; }, 0); }
+    if (mode === 'top2' && (window.clicks = (window.clicks || 0) + 1) === 2) top.location.href = AD + '?playertop2';
+  });
+</script></body></html>

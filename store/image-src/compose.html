@@ -1,0 +1,152 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>compose</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{overflow:hidden}
+body{font-family:"Ubuntu Sans","Ubuntu",sans-serif;color:#1f2328;background:#eef3fb;-webkit-font-smoothing:antialiased}
+.canvas{position:relative;overflow:hidden}
+.s{display:none}
+.blue{color:#1a73e8}
+h1{font-size:46px;line-height:1.12;font-weight:700;letter-spacing:-.5px}
+h1.c{text-align:center}
+.sub{font-size:21px;line-height:1.4;color:#4a5560;margin-top:12px}
+.sub.c{text-align:center}
+.shadow{box-shadow:0 24px 60px rgba(16,34,74,.22),0 4px 14px rgba(16,34,74,.12)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:22px}
+.brand img{width:36px;height:36px}
+
+/* stylized browser window */
+.win{position:absolute;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #cfd8e6}
+.tabs{height:40px;background:#dfe5ee;display:flex;align-items:flex-end;padding:0 10px;gap:4px}
+.tab{height:32px;min-width:0;flex:0 1 210px;background:#eaeef4;border-radius:9px 9px 0 0;display:flex;align-items:center;gap:8px;padding:0 12px;font-size:13px;color:#3c4350;white-space:nowrap;overflow:hidden}
+.tab.on{background:#fff;color:#1f2328}
+.tab .fav{width:14px;height:14px;border-radius:3px;flex:none}
+.tab span{overflow:hidden;text-overflow:ellipsis}
+.bar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid #e3e8ef}
+.omni{flex:1;height:30px;border-radius:15px;background:#f1f3f6;display:flex;align-items:center;padding:0 14px;font-size:14px;color:#3c4350;white-space:nowrap;overflow:hidden}
+.omni b{color:#1f2328;font-weight:500}
+.nav{width:16px;height:16px;border-radius:50%;border:2px solid #9aa3b0}
+.ext{position:relative;width:24px;height:24px}
+.ext img{width:24px;height:24px}
+.ext i{position:absolute;right:-9px;bottom:-6px;background:#d93025;color:#fff;font:700 10px/1 "Ubuntu Sans",sans-serif;font-style:normal;padding:2px 4px;border-radius:7px;border:1.5px solid #fff}
+.content{position:relative;overflow:hidden}
+.content img{display:block;width:100%}
+.popup{position:absolute;border-radius:10px;overflow:hidden;border:1px solid #cfd8e6}
+.popup img{display:block;width:100%}
+
+/* cards */
+.card{background:#fff;border:1px solid #d8e0ec;border-radius:14px;padding:18px 20px}
+.card h3{font-size:20px;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.card p{font-size:16px;line-height:1.45;color:#4a5560}
+.pill{display:inline-block;font-size:13px;font-weight:700;padding:3px 10px;border-radius:20px;background:#e8f0fe;color:#1a73e8}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+
+.adpage{background:#ffe14d;display:grid;place-items:center;font:700 34px "Ubuntu Sans",sans-serif;color:#3a3000;text-align:center}
+.adpage small{display:block;font-size:16px;font-weight:500;margin-top:8px}
+.verdict{position:absolute;font-size:18px;line-height:1.4;font-weight:600;text-align:center}
+.label{position:absolute;font-size:15px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase}
+</style></head><body>
+
+<!-- 1. hero -->
+<div class="canvas s" id="hero" style="width:1280px;height:800px;background:linear-gradient(180deg,#f5f8fd 0,#e6eefb 100%)">
+  <div style="position:absolute;left:0;right:0;top:44px">
+    <h1 class="c">Stop ad tabs, popups and <span class="blue">redirect hijacks</span></h1>
+    <p class="sub c">PopShield blocks what ad scripts open. The tabs you open yourself still work.</p>
+  </div>
+  <div class="win shadow" style="left:70px;top:196px;width:1140px;height:700px">
+    <div class="tabs"><div class="tab on"><i class="fav" style="background:#5b7ba6"></i><span>Example page</span></div></div>
+    <div class="bar"><i class="nav"></i><i class="nav"></i><div class="omni"><b>www.site.example</b>/example-page</div><div class="ext"><img src="raw/icon128.png"><i>5</i></div></div>
+    <div class="content"><img src="raw/demo-page.png"></div>
+  </div>
+  <div class="popup shadow" style="left:858px;top:290px;width:324px"><img src="raw/popup-light-smart.png"></div>
+</div>
+
+<!-- 2. before / after -->
+<div class="canvas s" id="beforeafter" style="width:1280px;height:800px;background:#f5f8fd">
+  <div style="position:absolute;left:0;right:0;top:40px">
+    <h1 class="c">Same clicks. No ad tabs.</h1>
+    <p class="sub c">Three clicks on a page with an aggressive popup script:</p>
+  </div>
+  <div class="label" style="left:56px;top:180px;color:#d93025">Without PopShield</div>
+  <div class="win shadow" style="left:56px;top:210px;width:568px;height:460px">
+    <div class="tabs"><div class="tab on"><i class="fav" style="background:#f9a825"></i><span>prize-winner.example</span></div><div class="tab"><i class="fav" style="background:#f9a825"></i><span>pop.ads.example</span></div><div class="tab"><i class="fav" style="background:#5b7ba6"></i><span>Example page</span></div></div>
+    <div class="bar"><i class="nav"></i><i class="nav"></i><div class="omni"><b>prize-winner.example</b>/claim?id=88</div></div>
+    <div class="content adpage" style="height:376px"><div>Advertisement<small>Your tab was redirected here</small></div></div>
+  </div>
+  <div class="verdict" style="left:56px;top:696px;width:568px;color:#3c4350">A popunder ad tab opened, and your tab<br>was hijacked by a tab-under redirect</div>
+
+  <div class="label" style="left:656px;top:180px;color:#1a73e8">With PopShield</div>
+  <div class="win shadow" style="left:656px;top:210px;width:568px;height:460px">
+    <div class="tabs"><div class="tab on"><i class="fav" style="background:#5b7ba6"></i><span>Example page</span></div></div>
+    <div class="bar"><i class="nav"></i><i class="nav"></i><div class="omni"><b>www.site.example</b>/example-page</div><div class="ext"><img src="raw/icon128.png"><i>5</i></div></div>
+    <div class="content" style="height:376px;background:#f6f8fb"><img src="raw/demo-page.png" style="height:100%;object-fit:cover;object-position:left top"></div>
+  </div>
+  <div class="verdict" style="left:656px;top:696px;width:568px;color:#3c4350">All 5 popup, ad-layer and redirect attempts blocked.<br><span class="blue">You stay on the page.</span></div>
+</div>
+
+<!-- 3. modes -->
+<div class="canvas s" id="modes" style="width:1280px;height:800px;background:linear-gradient(180deg,#f5f8fd 0,#e6eefb 100%)">
+  <div style="position:absolute;left:72px;top:96px;width:660px">
+    <div class="brand"><img src="raw/icon128.png">PopShield</div>
+    <h1 style="margin-top:22px">Choose how strict to be,<br>site by site</h1>
+    <div class="card" style="margin-top:30px"><h3><span class="pill">Smart</span><span style="font-size:15px;font-weight:500;color:#656d76">default</span></h3><p>Blocks the tabs, popups and redirects that ad scripts trigger. New tabs you open yourself still work.</p></div>
+    <div class="card" style="margin-top:14px"><h3><span class="pill">Strict</span></h3><p>No script may open a tab. Links you click, ctrl/middle-click and “Open link in new tab” still work.</p></div>
+    <div class="card" style="margin-top:14px"><h3><span class="pill">Off</span></h3><p>PopShield does nothing on that site. Embedded frames follow the mode of the page around them.</p></div>
+  </div>
+  <div class="popup shadow" style="left:820px;top:88px;width:360px"><img src="raw/popup-light-strict.png"></div>
+</div>
+
+<!-- 4. dark: blocked list -->
+<div class="canvas s" id="dark" style="width:1280px;height:800px;background:#15171b;color:#e8eaed">
+  <div style="position:absolute;left:72px;top:128px;width:640px">
+    <div class="brand"><img src="raw/icon128.png">PopShield</div>
+    <h1 style="margin-top:22px">See every block.<br><span style="color:#8ab4f8">Open any of them anyway.</span></h1>
+    <p class="sub" style="color:#b4bac3">The toolbar badge counts what was stopped on the page. The popup lists each item and why it was blocked.</p>
+    <div style="margin-top:30px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="card" style="background:#1f2227;border-color:#33373e"><h3 style="color:#e8eaed;font-size:18px">Popups &amp; popunders</h3><p style="color:#9aa0a6;font-size:15px">from page-wide click hooks</p></div>
+      <div class="card" style="background:#1f2227;border-color:#33373e"><h3 style="color:#e8eaed;font-size:18px">Invisible ad layers</h3><p style="color:#9aa0a6;font-size:15px">transparent overlays over the page</p></div>
+      <div class="card" style="background:#1f2227;border-color:#33373e"><h3 style="color:#e8eaed;font-size:18px">Redirect hijacks</h3><p style="color:#9aa0a6;font-size:15px">tab-under and click redirects</p></div>
+      <div class="card" style="background:#1f2227;border-color:#33373e"><h3 style="color:#e8eaed;font-size:18px">Scripted links &amp; forms</h3><p style="color:#9aa0a6;font-size:15px">fake clicks you never made</p></div>
+    </div>
+  </div>
+  <div class="popup" style="left:820px;top:88px;width:360px;border-color:#3c4043;box-shadow:0 24px 70px rgba(0,0,0,.6)"><img src="raw/popup-dark-smart.png"></div>
+</div>
+
+<!-- 5. privacy -->
+<div class="canvas s" id="privacy" style="width:1280px;height:800px;background:linear-gradient(180deg,#f5f8fd 0,#e6eefb 100%)">
+  <div style="position:absolute;left:0;right:0;top:96px;text-align:center">
+    <img src="raw/icon128.png" style="width:104px;height:104px">
+    <h1 class="c" style="margin-top:20px">Private by design</h1>
+    <p class="sub c">PopShield makes its decisions inside your browser.</p>
+  </div>
+  <div style="position:absolute;left:120px;right:120px;top:384px;display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <div class="card"><h3><i class="dot" style="background:#1a73e8"></i>No browsing history</h3><p>PopShield keeps no browsing history. The only site names it saves are the ones you choose a mode for; everything else is an anonymous count.</p></div>
+    <div class="card"><h3><i class="dot" style="background:#1a73e8"></i>No telemetry</h3><p>No analytics, no account, no background network requests. Details go to GitHub only if you press Report and confirm.</p></div>
+    <div class="card"><h3><i class="dot" style="background:#1a73e8"></i>No remote code or lists</h3><p>All logic ships inside the extension. It does not download filter lists or scripts.</p></div>
+    <div class="card"><h3><i class="dot" style="background:#1a73e8"></i>Open source</h3><p>Every line is public on GitHub, so you can check exactly what it does.</p></div>
+  </div>
+</div>
+
+<!-- promo tile 440x280 -->
+<div class="canvas s" id="tile" style="width:440px;height:280px;background:linear-gradient(135deg,#1a73e8 0,#1557b0 100%);color:#fff">
+  <div style="position:absolute;left:36px;top:44px;width:88px;height:88px;border-radius:22px;background:#fff;display:grid;place-items:center;box-shadow:0 8px 20px rgba(0,0,0,.18)"><img src="raw/icon128.png" style="width:60px;height:60px"></div>
+  <div style="position:absolute;left:144px;top:56px;font-size:40px;font-weight:700;letter-spacing:-.3px">PopShield</div>
+  <div style="position:absolute;left:146px;top:106px;font-size:15px;opacity:.9">Popup &amp; ad-tab blocker</div>
+  <div style="position:absolute;left:36px;right:30px;top:168px;font-size:20px;line-height:1.35;font-weight:600">Blocks ad tabs, popunders and redirect hijacks. Your own clicks still work.</div>
+</div>
+
+<!-- marquee 1400x560 -->
+<div class="canvas s" id="marquee" style="width:1400px;height:560px;background:linear-gradient(135deg,#1a73e8 0,#1557b0 100%);color:#fff">
+  <div style="position:absolute;left:90px;top:110px;width:720px">
+    <div style="display:flex;align-items:center;gap:22px">
+      <div style="width:104px;height:104px;border-radius:26px;background:#fff;display:grid;place-items:center;box-shadow:0 10px 26px rgba(0,0,0,.2)"><img src="raw/icon128.png" style="width:72px;height:72px"></div>
+      <div style="font-size:64px;font-weight:700;letter-spacing:-.8px">PopShield</div>
+    </div>
+    <div style="font-size:36px;line-height:1.25;font-weight:600;margin-top:38px">Stop ad tabs, popups and<br>redirect hijacks.</div>
+    <div style="font-size:21px;line-height:1.45;margin-top:16px;opacity:.9">The tabs you open yourself keep working.<br>No tracking, no telemetry, no remote code.</div>
+  </div>
+  <div class="popup" style="left:990px;top:36px;width:300px;border:0;box-shadow:0 30px 70px rgba(0,0,0,.35)"><img src="raw/popup-light-smart.png"></div>
+</div>
+
+<script>document.getElementById(new URLSearchParams(location.search).get('s')).style.display='block';</script>
+</body></html>
