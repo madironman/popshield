@@ -73,9 +73,10 @@ for (const scheme of ['light', 'dark']) {
         return real(opts);
       };
     });
-    let dialogText = '';
-    ui.once('dialog', (d) => { dialogText = d.message(); d.accept(); });
     await ui.click('#report-ad');
+    await ui.locator('#confirm').waitFor({ state: 'visible' });
+    const dialogText = await ui.locator('#confirm-text').innerText();
+    await ui.click('#confirm-yes');
     await ui.waitForTimeout(300);
     const captured = await ui.evaluate(() => window.__opened[0] || '');
     let iu = null;
@@ -84,6 +85,15 @@ for (const scheme of ['light', 'dark']) {
       iu.searchParams.get('url') === 'http://localhost:8711/scenario.html' && /popup|redirect|scripted/.test(iu.searchParams.get('blocked-log') || ''),
       'Report button opens a pre-filled issue (site without query string, blocked summary)');
     ok(/GitHub receives them/.test(dialogText), 'Report asks first and says what GitHub will receive');
+    // Reset stats: confirmation panel inside the popup (no browser dialogs).
+    await ui.click('#reset-stats');
+    await ui.locator('#confirm').waitFor({ state: 'visible' });
+    await ui.click('#confirm-no');
+    const kept = await ui.locator('#total').innerText();
+    await ui.click('#reset-stats');
+    await ui.click('#confirm-yes');
+    await ui.waitForTimeout(300);
+    ok(kept !== '0' && (await ui.locator('#total').innerText()) === '0', 'Reset stats: Cancel keeps the counter, Reset clears it');
     const before = ctx.pages().length;
     await ui.locator('#log li button').first().click();
     await ui.waitForTimeout(500);

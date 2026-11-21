@@ -53,7 +53,7 @@ body:
         - label: A popup window opened
         - label: A tab opened behind the current one (popunder)
         - label: The current tab was redirected to an ad
-        - label: Chrome showed a "Leave site?" prompt
+        - label: The tab jumped to another site and PopShield sent it back
         - label: Something else (describe below)
   - type: textarea
     id: steps

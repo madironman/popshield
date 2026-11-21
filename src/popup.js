@@ -31,6 +31,22 @@ const REASONS = {
 
 const $ = (s) => document.querySelector(s);
 
+// A confirmation panel inside the popup. (Browser dialogs such as confirm()
+// aren't reliable in a toolbar popup.) Resolves true on OK, false on Cancel.
+function askInPopup(text, okLabel) {
+  return new Promise((resolve) => {
+    const box = $('#confirm');
+    $('#confirm-text').textContent = text;
+    $('#confirm-yes').textContent = okLabel;
+    box.hidden = false;
+    box.scrollIntoView({ block: 'nearest' });
+    $('#confirm-yes').focus();
+    const done = (v) => { box.hidden = true; $('#confirm-yes').onclick = $('#confirm-no').onclick = null; resolve(v); };
+    $('#confirm-yes').onclick = () => done(true);
+    $('#confirm-no').onclick = () => done(false);
+  });
+}
+
 // ---- reporting: opens a pre-filled GitHub issue / discussion in a new tab.
 // The details are in the github.com address, so GitHub receives them when the
 // tab opens; the user confirms first and nothing is public unless they submit.
@@ -88,7 +104,7 @@ async function renderStats() {
 function setupStats() {
   $('#reset-stats').onclick = async (e) => {
     e.preventDefault();
-    if (!confirm('Reset the lifetime counter on this device?')) return;
+    if (!(await askInPopup('Reset the counter of blocked popups on this device?', 'Reset'))) return;
     await chrome.storage.local.set({ stats: { total: 0, since: Date.now(), days: {}, kinds: {} } });
     renderStats();
   };
@@ -184,10 +200,10 @@ async function main() {
     };
     const title = template === 'ad-got-through.yml' ? `[Ad got through]: ${site}` : `[False positive]: ${site}`;
     // Say exactly what will reach GitHub before opening anything.
-    const ok = confirm(`This opens github.com with these details filled in:\n\n` +
+    const ok = await askInPopup(`This opens github.com with these details filled in:\n` +
       `• Page: ${common.url || site}\n• Mode: ${common.mode}\n• Chrome ${common['chrome-version']}, PopShield ${common['popshield-version']}\n` +
       `• What was blocked (types and ad hostnames)\n\nGitHub receives them as soon as the tab opens. ` +
-      `Nothing becomes public unless you sign in and press Submit, and you can edit everything first.\n\nContinue to GitHub?`);
+      `Nothing becomes public unless you sign in and press Submit, and you can edit everything first.`, 'Continue to GitHub');
     if (!ok) return;
     openIssue(template, { title, ...common });
   }

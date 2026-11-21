@@ -466,10 +466,23 @@
     const type = e.type;
     if (modeIs('off')) return;
 
-    // Child frame: tell the top frame (via the background) the user is clicking here.
-    if (!isTop && (type === 'pointerdown' || type === 'mousedown' || type === 'touchstart')) {
+    // Tell the background who the user is clicking: a child frame (embedded
+    // content) or the page itself. It uses this to undo a whole-tab takeover by
+    // embedded content right after a click inside it.
+    if (type === 'pointerdown' || type === 'mousedown' || type === 'touchstart') {
       const now = Date.now();
-      if (now - lastRelay > 250) { lastRelay = now; send({ type: 'frameGesture' }); }
+      if (now - lastRelay > 250) { lastRelay = now; send({ type: isTop ? 'topGesture' : 'frameGesture' }); }
+    }
+    // A real link inside embedded content that is meant to open in the whole
+    // tab (target=_top/_parent): the user asked for it, so allow that one.
+    if (!isTop && type === 'click') {
+      const l = clickedLink(e);
+      if (l) {
+        let t = l.getAttribute('target');
+        if (t == null) t = baseTarget(l.ownerDocument);
+        t = String(t || '').toLowerCase();
+        if (t === '_top' || t === '_parent') send({ type: 'frameTopLink', url: linkHref(l) });
+      }
     }
     if (type === 'pointerdown' || type === 'mousedown' || type === 'touchstart' || type === 'keydown') {
       lastPressAt = performance.now();
@@ -658,26 +671,12 @@
       return v;
     }
 
-    // A cross-site iframe doing `top.location = ad` never fires the navigate
-    // event above. The top page still gets beforeunload: if the user clicked
-    // inside a cross-site frame a moment ago, hold the page ("Leave site?").
-    window.addEventListener('beforeunload', onBeforeUnload, true);
-    function onBeforeUnload(e) {
-      if (modeIs('off') || !frameJustClicked() || inDispatch()) return;
-      // Was the recent click inside a cross-site frame?
-      let crossSite = false;
-      for (const f of document.querySelectorAll('iframe,frame')) {
-        const fs = destSite(f.src);
-        if (fs && fs !== pageSite()) { crossSite = true; break; }
-      }
-      if (!crossSite) return;
-      e.preventDefault();
-      e.returnValue = '';
-      block('redirect', 'embedded-frame', '');
-    }
+    // (A cross-site frame doing `top.location = ad` never fires the navigate
+    // event above. That case is handled in the background, which sees the
+    // navigation commit and sends the tab back — no "Leave site?" prompt, so
+    // closing a tab or typing a URL is never interrupted.)
     armTopWindow = () => {
       window.addEventListener('blur', onTopBlur, true);
-      window.addEventListener('beforeunload', onBeforeUnload, true);
     };
   }
 })();

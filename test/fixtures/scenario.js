@@ -91,6 +91,9 @@ const S = {
   'player-iframe-popup'() { // a widget embedded from another site (cross-site frame) whose ad script hooks clicks
     el(`<iframe id="pf" src="${window.AD_ORIGIN}/player.html?mode=popup" style="width:660px;height:320px;border:0"></iframe>`);
   },
+  'legit-frame-top-link'() { // a real target=_top link inside embedded content: the user asked for it
+    el(`<iframe id="pf" src="${window.AD_ORIGIN}/player.html?mode=none" style="width:660px;height:320px;border:0"></iframe>`);
+  },
   'player-iframe-top-redirect'() { // a widget embedded from another site that hijacks the whole tab
     el(`<iframe id="pf" src="${window.AD_ORIGIN}/player.html?mode=top" style="width:660px;height:320px;border:0"></iframe>`);
   },

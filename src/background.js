@@ -98,6 +98,31 @@ function isRedirectHop(d) {
 }
 const weakTabs = new Set(); // tabs opened on weak evidence, until their first page asks
 const restoring = new Set(); // tabs we are sending back: keep their log
+// Embedded-content takeover: when the user last pressed inside a child frame
+// vs. on the page itself, the last real target=_top link clicked in a frame,
+// and the page each tab is on.
+const FRAME_TAKEOVER_MS = 6000;
+const frameGestureAt = new Map(), topGestureAt = new Map(), frameTopLink = new Map(), lastTopUrl = new Map();
+function samePage(a, b) { try { const x = new URL(a), y = new URL(b); return x.origin === y.origin && x.pathname === y.pathname; } catch { return false; } }
+async function checkFrameTakeover(d, prevUrl) {
+  const now = Date.now();
+  const fg = frameGestureAt.get(d.tabId) || 0;
+  if (!prevUrl || now - fg > FRAME_TAKEOVER_MS || fg <= (topGestureAt.get(d.tabId) || 0)) return false;
+  const q = d.transitionQualifiers || [];
+  if (['typed', 'auto_bookmark', 'generated', 'keyword', 'keyword_generated', 'reload'].includes(d.transitionType) ||
+      q.includes('forward_back') || q.includes('from_address_bar')) return false;  // the user's own navigation
+  const prevSite = PS.siteOfUrl(prevUrl), site = PS.siteOfUrl(d.url);
+  if (!prevSite || !site || site === prevSite || PS.isProviderFlow(d.url)) return false;
+  const link = frameTopLink.get(d.tabId);
+  if (link && now - link.at < FRAME_TAKEOVER_MS && samePage(link.url, d.url)) return false;  // a real link the user clicked
+  const tab = await chrome.tabs.get(d.tabId).catch(() => null);
+  if ((await PS.getMode(prevSite, !!(tab && tab.incognito))) === 'off') return false;
+  frameGestureAt.delete(d.tabId);
+  restoring.add(d.tabId);
+  chrome.tabs.goBack(d.tabId).catch(() => { restoring.delete(d.tabId); });
+  logBlocked(d.tabId, { kind: 'redirect', reason: 'embedded-frame', url: clamp(d.url, 2000) });
+  return true;
+}
 // When a tab last opened another tab. Kept here (not in the page) so a hop to
 // another page of the same site can't make the opener "forget" it.
 const newTabAt = new Map(); // tabId -> Date.now()
@@ -196,9 +221,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       kind: msg.kind, reason: msg.reason, url: clamp(msg.url, 2000),
       frameUrl: cleanUrl(sender.url || ''), source: clamp(msg.source, 120) || undefined,
     });
+  } else if (msg.type === 'topGesture') {
+    if (sender.frameId === 0) topGestureAt.set(tabId, Date.now());
+  } else if (msg.type === 'frameTopLink') {
+    // The user clicked a real target=_top link inside embedded content.
+    if (sender.frameId !== 0 && typeof msg.url === 'string') frameTopLink.set(tabId, { url: msg.url.slice(0, 2000), at: Date.now() });
   } else if (msg.type === 'frameGesture') {
-    // A child frame saw the user press the pointer: tell the top frame.
+    // A child frame saw the user press the pointer: remember it, tell the top frame.
     if (sender.frameId === 0 || overLimit(tabId, 'frameGesture', 4, 1000)) return;
+    frameGestureAt.set(tabId, Date.now());
     chrome.tabs.sendMessage(tabId, { type: 'frameGesture' }, { frameId: 0 }).catch(() => {});
   } else if (msg.type === 'tabState') {
     // A top frame asks at startup: did this tab open another tab recently?
@@ -268,8 +299,11 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
 });
 
 // Fresh log for each new page in the tab; nothing outlives the tab.
-chrome.webNavigation.onCommitted.addListener((d) => {
+chrome.webNavigation.onCommitted.addListener(async (d) => {
   if (d.frameId !== 0) return;
+  const prevUrl = lastTopUrl.get(d.tabId);
+  lastTopUrl.set(d.tabId, d.url);
+  if (await checkFrameTakeover(d, prevUrl)) return;
   const now = Date.now();
   const hop = isRedirectHop(d);
   const tw = tabWatch.get(d.tabId);
@@ -308,6 +342,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   tabWatch.delete(tabId);
   navWatch.delete(tabId);
   newTabAt.delete(tabId);
+  frameGestureAt.delete(tabId); topGestureAt.delete(tabId); frameTopLink.delete(tabId); lastTopUrl.delete(tabId);
   weakTabs.delete(tabId);
   restoring.delete(tabId);
   for (const k of buckets.keys()) if (k.startsWith(tabId + '|')) buckets.delete(k);
