@@ -251,8 +251,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const also = typeof msg.also === 'string' && PS.isProviderFlow(msg.also) ? PS.siteOfUrl(msg.also) : null;
     if (site) navWatch.set(tabId, { until: Date.now() + WATCH_MS, sites: new Set([site, also].filter(Boolean)) });
   } else if (msg.type === 'frameOverlay') {
-    // The top frame saw a click go into a large, near-invisible frame.
-    if (sender.frameId === 0) frameOverlayAt.set(tabId, Date.now());
+    // The top frame saw a click go into a near-invisible frame. The frame's own
+    // "allow" can arrive in the same instant, so also revoke child-frame
+    // tokens minted just before this signal (order-independent).
+    if (sender.frameId === 0) {
+      frameOverlayAt.set(tabId, Date.now());
+      const arr = (tokens.get(tabId) || []).filter((t) => t.frameId === 0 || t.exp - TOKEN_TTL < Date.now() - 1500);
+      tokens.set(tabId, arr);
+    }
   }
 });
 
@@ -275,6 +281,12 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
   if ((await PS.getMode(site, !!src.incognito)) === 'off') return;
   let tok = takeToken(d.sourceTabId, d.url, site);
   if (!tok) { await sleep(GRACE); tok = takeToken(d.sourceTabId, d.url, site); }
+  // A tab opened from a child frame: give the top frame's "that frame is
+  // invisible" signal a moment to arrive before trusting the frame's click.
+  if (tok && tok.frameId !== 0) {
+    await sleep(150);
+    if (Date.now() - (frameOverlayAt.get(d.sourceTabId) || 0) < 2000) tok = null;
+  }
   if (tok) {
     // Tell the opener's top frame: redirects of that tab now look like tab-unders.
     newTabAt.set(d.sourceTabId, Date.now());
