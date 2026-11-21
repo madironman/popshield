@@ -9,6 +9,13 @@ const types = { '.html': 'text/html', '.js': 'text/javascript' };
 
 export function startServers() {
   const handler = (req, res) => {
+    // Open redirector (like a site's own /out?to= endpoint): 302 to ?to=.
+    // Checks that PopShield follows where a tab really lands, not just its first URL.
+    const u = new URL(req.url, 'http://x');
+    if (u.pathname === '/__redir') {
+      res.writeHead(302, { location: u.searchParams.get('to') || '/other.html', 'cache-control': 'no-store' });
+      return res.end();
+    }
     const p = path.join(root, path.normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname)));
     if (!p.startsWith(root) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end('nf'); }
     res.writeHead(200, { 'content-type': types[path.extname(p)] || 'application/octet-stream', 'cache-control': 'no-store' });

@@ -1,0 +1,8 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>rt-hop</title></head>
+<body>loading...
+<script>
+  // Same-site landing page for the "rt-tabunder-samesite-hop" scenario: redirects to the ad after ?ms.
+  const ms = +(new URLSearchParams(location.search).get('ms') || 0);
+  setTimeout(() => { location.href = 'http://127.0.0.1:8712/ad.html?rt-samesite-hop'; }, ms);
+</script></body></html>

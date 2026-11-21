@@ -276,6 +276,279 @@ Object.assign(S, {
   },
 });
 
+// ---- red-team regressions -------------------------------------------------
+// One scenario per bypass found by the red-team passes ("rt-" prefix). Each
+// worked in plain Chrome AND got past some earlier PopShield version.
+const REDIR = (to) => '/__redir?to=' + encodeURIComponent(to); // same-site open redirector (server.mjs)
+const RT_FRAME = (mode) => window.AD_ORIGIN + '/rt-frame.html?mode=' + mode;
+// An SVG <a> with only xlink:href, clicked by a synthetic event: opens a tab without any hooked API.
+function unhookedOpen(url) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const a = document.createElementNS('http://www.w3.org/2000/svg', 'a');
+  a.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', url); a.setAttribute('target', '_blank');
+  s.append(a); document.documentElement.append(s);
+  a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); s.remove();
+}
+Object.assign(S, {
+  // -- round 1 --
+  'rt-prepare-stack-trace'() { // fake an "element handler after await" stack
+    playerControls();
+    Error.prepareStackTrace = () => '    at async HTMLButtonElement.onclick (x)';
+    document.addEventListener('click', () => setTimeout(() => window.open(AD + '?rt-pst'), 0));
+  },
+  'rt-bound-element-receiver'() { // timer callback bound to an element: "at HTMLButtonElement.pop"
+    playerControls();
+    const fake = document.createElement('button');
+    function pop() { window.open(AD + '?rt-bound'); }
+    document.addEventListener('click', () => setTimeout(pop.bind(fake), 0));
+  },
+  'rt-currenttarget-spoof'() { // page rewrites Event.prototype.currentTarget
+    playerControls();
+    const g = Object.getOwnPropertyDescriptor(Event.prototype, 'currentTarget').get;
+    const fake = document.createElement('button');
+    Object.defineProperty(Event.prototype, 'currentTarget', { configurable: true, get() {
+      const c = g.call(this); return (c === document || c === window) && this.__ad ? fake : c; } });
+    document.addEventListener('click', (e) => { e.__ad = 1; window.open(AD + '?rt-ct'); });
+  },
+  'rt-timer-redirect'() { // page-wide hook, redirect from a timer
+    playerControls();
+    document.addEventListener('click', () => setTimeout(() => { location.href = AD + '?rt-timer'; }, 0), { once: true });
+  },
+  'rt-delayed-tab-under'() { // cache-busted copy tab, redirect 2.1 s later
+    const app = el('<div id="app"></div>', document.body); app.append(ui); playerControls();
+    app.addEventListener('click', () => {
+      window.open(location.href.split('?')[0] + '?t=none&copy=1');
+      setTimeout(() => { location.href = AD + '?rt-tabunder'; }, 2100);
+    }, { once: true });
+  },
+  'rt-overlay-link-pixel'() { // invisible full-page link with a 1x1 image inside
+    playerControls();
+    el(`<a href="${AD}?rt-pixel" target="_blank" style="position:fixed;inset:0;opacity:0;z-index:99"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="1" height="1"></a>`);
+  },
+  'rt-overlay-parent-opacity'() { // opacity on the wrapper, the link itself is opaque
+    playerControls();
+    el(`<div style="position:fixed;inset:0;opacity:0;z-index:99"><a href="${AD}?rt-parentopacity" target="_blank" style="display:block;width:100%;height:100%"></a></div>`);
+  },
+  'rt-overlay-near-threshold'() { // opacity 0.15, background alpha 0.01
+    playerControls();
+    el(`<a href="${AD}?rt-alpha" target="_blank" style="position:fixed;inset:0;opacity:0.15;background:rgba(255,255,255,0.01);z-index:99"></a>`);
+  },
+  'rt-nonce-leak-document-open'() { // document.open() used to re-broadcast the bridge nonce
+    setTimeout(() => {
+      let nonce;
+      document.open();
+      document.addEventListener('popshield:hello', (e) => { nonce = e.detail; });
+      document.write('<!doctype html><body data-ready="1"><button id="play" style="margin:40px">Play</button></body>');
+      document.close();
+      setTimeout(() => {
+        if (nonce) document.dispatchEvent(new CustomEvent('ps-' + nonce + '-down', { detail: JSON.stringify({ type: 'mode', mode: 'off' }) }));
+        document.addEventListener('click', () => {
+          if (nonce) document.dispatchEvent(new CustomEvent('ps-' + nonce + '-up', { detail: JSON.stringify({ type: 'allow', how: 'contextmenu' }) }));
+          window.open(AD + '?rt-nonce');
+        });
+      }, 50);
+    }, 0);
+  },
+  'rt-poison-trim'() { // String.prototype.trim poisoned to make an empty overlay look non-empty
+    playerControls();
+    el(`<a href="${AD}?rt-trim" target="_blank" style="position:fixed;inset:0;opacity:0;z-index:99"></a>`);
+    const trim = String.prototype.trim;
+    String.prototype.trim = function () { const r = trim.call(this); return r === '' ? ' ' : r; };
+  },
+  'rt-poison-regexp'() { // RegExp.prototype.test poisoned so the URL scheme check fails
+    playerControls();
+    const test = RegExp.prototype.test;
+    RegExp.prototype.test = function (s) { return this.source === '^https?:$' ? false : test.call(this, s); };
+    document.addEventListener('click', () => { location.href = AD + '?rt-regexp'; });
+  },
+  'rt-poison-useractivation'() { // navigator.userActivation lies "inactive"
+    playerControls();
+    Object.defineProperty(UserActivation.prototype, 'isActive', { get: () => false, configurable: true });
+    document.addEventListener('click', () => { location.href = AD + '?rt-ua'; });
+  },
+  'rt-pristine-click'() { // HTMLElement.prototype.click from a fresh iframe realm
+    playerControls();
+    const f = document.createElement('iframe'); f.style.display = 'none'; document.documentElement.append(f);
+    const pristineClick = frames[frames.length - 1].HTMLElement.prototype.click;
+    document.addEventListener('click', () => {
+      const a = document.createElement('a'); a.href = AD + '?rt-pristineclick'; a.target = '_blank';
+      pristineClick.call(a);
+    });
+  },
+  'rt-contextmenu-token-ride'() { // whole page inside an href'd element; right-click, then click
+    el('<a href="#" style="display:contents;color:inherit"><button id="play">Play</button></a>');
+    document.addEventListener('click', (e) => { e.preventDefault(); unhookedOpen(AD + '?rt-ctxtoken'); }, true);
+  },
+  'rt-svg-xlink-dispatch'() { // SVG <a> with only xlink:href, synthetic click
+    playerControls();
+    const svg = el('<svg width="0" height="0"><a id="sa" target="_blank"><rect width="1" height="1"/></a></svg>');
+    svg.querySelector('#sa').setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', AD + '?rt-svgxlink');
+    document.addEventListener('click', () => svg.querySelector('#sa').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
+  },
+  'rt-transparent-xframe'() { // invisible full-page cross-site frame, div listener inside
+    playerControls();
+    el(`<iframe src="${RT_FRAME('fulldiv')}" style="position:fixed;inset:0;width:100vw;height:100vh;border:0;opacity:0;z-index:99"></iframe>`);
+  },
+  'rt-frame-redirect-delayed'() { // player frame hijacks the top page 1.7 s after the click
+    el(`<iframe id="pf" src="${window.AD_ORIGIN}/player.html?mode=topdelay&ms=1700" style="width:660px;height:320px;border:0"></iframe>`);
+  },
+  'rt-frame-redirect-blur-first'() { // player frame gives focus back to the top page, then hijacks
+    el(`<iframe id="pf" src="${window.AD_ORIGIN}/player.html?mode=topblur" style="width:660px;height:320px;border:0"></iframe>`);
+  },
+  'rt-ctrl-anywhere-token'() { // ctrl+click on a non-link used to mint a token for any site
+    playerControls();
+    document.addEventListener('click', () => unhookedOpen(AD + '?rt-ctrl'));
+  },
+  'rt-real-link-token-race'() { // the user's real link click; an unhooked ad open races for its token
+    el('<a id="dl" href="/other.html?download" target="_blank">Download</a>');
+    document.addEventListener('click', () => unhookedOpen(AD + '?rt-race'), true);
+  },
+  'rt-meta-refresh'() { // <meta refresh> injected on click
+    playerControls();
+    document.addEventListener('click', () => {
+      const m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '0;url=' + AD + '?rt-meta';
+      document.head.append(m);
+    }, { once: true });
+  },
+  'rt-fake-jquery'() { // jQuery-shaped object with a match-everything delegated selector
+    playerControls();
+    const h = { selector: '*:not(.zz)', handler() { window.open(AD + '?rt-fakejq'); } };
+    window.jQuery = { _data: (n, k) => (n === document && k === 'events' ? { click: [h] } : undefined) };
+    document.addEventListener('click', () => h.handler());
+  },
+  'rt-fake-react-props'() { // React-shaped props planted on the clicked node, called from a page-wide listener
+    playerControls();
+    const K = '__reactProps$rtx';
+    document.addEventListener('pointerdown', (e) => { e.target[K] = { onClick() { window.open(AD + '?rt-fakereact'); } }; }, true);
+    document.addEventListener('click', (e) => { const p = e.target[K]; if (p) p.onClick(); });
+  },
+  'rt-wrapper-redirect'() { // same-tab hijack from a full-page wrapper div
+    const app = el('<div id="app" style="min-height:100vh"></div>', document.body); app.append(ui); playerControls();
+    app.addEventListener('click', () => { location.href = AD + '?rt-wrapredirect'; }, { once: true });
+  },
+  'rt-hijack-legit-popup'() { // a legit share popup is later sent to an ad by the opener
+    el('<button id="share">Share</button>');
+    let w;
+    $('#share').addEventListener('click', () => { w = window.open('/other.html?share', 'share'); });
+    document.addEventListener('click', () => setTimeout(() => { if (w) w.location.href = AD + '?rt-reused'; }, 1500));
+  },
+  'rt-sandboxed-realm'() { // script-less same-origin frame: its realm is never patched
+    playerControls();
+    const f = el('<iframe sandbox="allow-same-origin" srcdoc="<p>x" style="display:none"></iframe>');
+    document.addEventListener('click', () => {
+      const a = document.createElement('a'); a.href = AD + '?rt-sandboxrealm'; a.target = '_blank';
+      f.contentWindow.HTMLElement.prototype.click.call(a);
+    });
+  },
+  // -- round 2 --
+  'rt-async-forge-redirector'() { // forged element frame after a timer, same-site 302 to the ad
+    playerControls();
+    const b = document.createElement('button');
+    b.addEventListener('x', () => window.open(REDIR(AD + '?rt-asyncforge'), '_blank', 'noopener'));
+    document.addEventListener('click', () => setTimeout(() => b.dispatchEvent(new Event('x')), 0));
+  },
+  'rt-redirector-navigation'() { // page-wide hook sends this tab to a same-site redirector
+    playerControls();
+    document.addEventListener('click', () => { location.href = REDIR(AD + '?rt-redirector'); });
+  },
+  'rt-tabunder-pointerup-reset'() { // tab opened on pointerup; the click resets state; redirect after 5.3 s
+    playerControls();
+    $('#play').addEventListener('pointerup', () => window.open('/other.html?watch'));
+    $('#play').addEventListener('click', () => setTimeout(() => { location.href = AD + '?rt-tabunder-reset'; }, 5300));
+  },
+  'rt-delayed-redirect'() { // element click, then a redirect after the 5 s activation window
+    playerControls();
+    $('#play').addEventListener('click', () => setTimeout(() => { location.href = AD + '?rt-delayed'; }, 5300));
+  },
+  'rt-tabunder-after-user-link'() { // real target=_blank link, then the original tab is redirected 5.3 s later
+    el('<a id="link" href="/other.html?watch" target="_blank">Watch</a>');
+    $('#link').addEventListener('click', () => setTimeout(() => { location.href = AD + '?rt-tabunder-link'; }, 5300));
+  },
+  'rt-two-49pct-wrappers'() { // two wrappers, each just under half the viewport
+    const top = el('<div id="w1" style="height:49vh;overflow:hidden"></div>', document.body);
+    el('<div id="w2" style="height:49vh;overflow:hidden"><p>more content</p></div>', document.body);
+    top.append(ui); playerControls();
+    for (const w of [top, $('#w2')]) w.addEventListener('click', () => window.open(AD + '?rt-wrap49'));
+  },
+  'rt-closed-shadow-overlay'() { // invisible overlay inside a closed shadow root, host has no box
+    playerControls();
+    const h = el('<span id="h" style="display:contents"></span>', document.body);
+    h.attachShadow({ mode: 'closed' }).innerHTML = '<div style="position:fixed;inset:0;z-index:99"></div>';
+    h.addEventListener('click', () => window.open(AD + '?rt-shadow-overlay'));
+  },
+  'rt-overlay-submit-button'() { // invisible full-page submit button of a target=_blank form
+    playerControls();
+    el(`<form id="rtf" action="${AD}" method="get"><input type="hidden" name="rt" value="submit-overlay"></form>`);
+    el('<button form="rtf" formtarget="_blank" style="position:fixed;inset:0;opacity:0;z-index:99;border:0"></button>');
+  },
+  'rt-keystroke-requestsubmit'() { // any keystroke in a field, then requestSubmit() from a timer
+    el(`<form id="rtf" action="${AD}" target="_blank"><input id="q" name="q" placeholder="search"></form>`);
+    $('#q').addEventListener('keyup', () => setTimeout(() => $('#rtf').requestSubmit(), 0));
+  },
+  'rt-small-invisible-xframe'() { // opacity-0 cross-site frame exactly over the Play button
+    playerControls();
+    const r = $('#play').getBoundingClientRect();
+    el(`<iframe src="${RT_FRAME('button')}" style="position:absolute;left:${r.left + scrollX}px;top:${r.top + scrollY}px;width:${r.width}px;height:${r.height}px;border:0;opacity:0;z-index:9"></iframe>`, document.body);
+  },
+  'rt-xframe-opacity021-link'() { // full-page cross-site frame at opacity 0.21 with a link inside
+    playerControls();
+    el(`<iframe src="${RT_FRAME('link')}" style="position:fixed;inset:0;width:100vw;height:100vh;border:0;opacity:0.21;z-index:99"></iframe>`);
+  },
+  'rt-grid-overlay-link'() { // invisible link stacked by CSS grid, no positioning
+    const g = el('<div id="g" style="display:grid;min-height:100vh"></div>', document.body);
+    const c = el('<div style="grid-area:1/1"></div>', g); c.append(ui); playerControls();
+    el(`<a href="${AD}?rt-grid" target="_blank" style="grid-area:1/1;opacity:0;z-index:5"></a>`, g);
+  },
+  'rt-overlay-transparent-text'() { // fixed overlay link whose text is transparent
+    playerControls();
+    el(`<a href="${AD}?rt-transparent-text" target="_blank" style="position:fixed;inset:0;z-index:99;color:transparent;font-size:1px">ad</a>`);
+  },
+  'rt-overlay-transparent-gradient'() { // fixed overlay link with a gradient that paints nothing
+    playerControls();
+    el(`<a href="${AD}?rt-gradient" target="_blank" style="position:fixed;inset:0;z-index:99;background-image:linear-gradient(transparent,transparent)"></a>`);
+  },
+  'rt-overlay-detach-before-open'() { // overlay removes itself before asking to open
+    playerControls();
+    const d = el('<div style="position:fixed;inset:0;z-index:99"></div>');
+    d.addEventListener('click', () => { d.remove(); window.open(AD + '?rt-detach'); });
+  },
+  'rt-wrapper-shrink-before-open'() { // full-page root shrinks itself for the ask, then restores
+    const app = el('<div id="app" style="min-height:100vh"></div>', document.body); app.append(ui); playerControls();
+    app.addEventListener('click', () => {
+      const h = app.style.cssText; app.style.cssText = 'height:1px;min-height:0;overflow:hidden';
+      window.open(AD + '?rt-shrink');
+      app.style.cssText = h;
+    });
+  },
+  'rt-requestsubmit-formtarget'() { // page-wide hook: requestSubmit(submitter with formtarget=_blank)
+    playerControls();
+    el(`<form id="rtf" action="${AD}"><input type="hidden" name="rt" value="formtarget"><button id="s" formtarget="_blank" style="display:none"></button></form>`);
+    document.addEventListener('click', () => setTimeout(() => $('#rtf').requestSubmit($('#s')), 0)); // timer: the native-submit path
+  },
+  'rt-submitter-click-post'() { // page-wide hook: real .click() on a POST target=_blank form's button
+    playerControls();
+    el(`<form id="rtf" method="post" target="_blank" action="${AD}?rt-submitter-click"><button id="s" style="display:none"></button></form>`);
+    document.addEventListener('click', () => $('#s').click()); // inside the click: the in-dispatch path
+  },
+  'rt-frame-redirect-after-4s'() { // player frame hijacks the top page 4.3 s after the click
+    el(`<iframe id="pf" src="${window.AD_ORIGIN}/player.html?mode=topdelay&ms=4300" style="width:660px;height:320px;border:0"></iframe>`);
+  },
+  // -- round 3 --
+  'rt-tabunder-samesite-hop'() { // real _blank link; the opener hops to a same-site page that redirects 8.5 s later
+    el('<a id="link" href="/other.html?watch" target="_blank">Watch</a>');
+    $('#link').addEventListener('click', () => setTimeout(() => { location.href = '/rt-hop.html?ms=8500'; }, 50));
+  },
+  'rt-link-href-swap-redirector'() { // real _blank link to this site; a page-wide listener swaps its href to a same-site redirector
+    el('<a id="link" href="/other.html?watch" target="_blank">Watch</a>');
+    document.addEventListener('click', (e) => { const a = e.target.closest('a'); if (a) a.href = REDIR(AD + '?rt-href-swap'); });
+  },
+  // -- legit (false-positive guard found by the red team) --
+  'legit-closed-shadow-link'() { // a target=_blank link inside a closed-shadow web component
+    const h = el('<span id="host" style="display:block;width:300px;height:40px"></span>');
+    h.attachShadow({ mode: 'closed' }).innerHTML = `<a href="${AD}?shadowlink" target="_blank" style="display:block;height:40px">Docs</a>`;
+  },
+});
+
 if (S[t]) S[t]();
 document.title = 'scenario:' + t;
 document.body.dataset.ready = '1';

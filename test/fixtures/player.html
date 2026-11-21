@@ -9,6 +9,10 @@
   document.addEventListener('click', () => {
     if (mode === 'popup') window.open(AD + '?playerpopup');
     if (mode === 'top') top.location.href = AD + '?playertop';
+    // Delayed hijack: ?mode=topdelay&ms=N navigates the top page N ms after the click.
+    if (mode === 'topdelay') setTimeout(() => { top.location.href = AD + '?playerdelay'; }, +(new URLSearchParams(location.search).get('ms') || 0));
+    // Hand focus back to the top page first, then hijack.
+    if (mode === 'topblur') { top.focus(); if (document.activeElement) document.activeElement.blur(); setTimeout(() => { top.location.href = AD + '?playerblur'; }, 0); }
     if (mode === 'top2' && (window.clicks = (window.clicks || 0) + 1) === 2) top.location.href = AD + '?playertop2';
   });
 </script></body></html>

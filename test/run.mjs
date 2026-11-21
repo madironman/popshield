@@ -15,13 +15,17 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { startServers } from './server.mjs';
 
-const EXT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const EXT = process.env.POPSHIELD_EXT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'http://localhost:8711/scenario.html?t=';
 const SETTLE = 1500; // > backstop grace (400ms) + slack
 
 // tabs: new tabs left open afterwards. url: where the main tab must end up
 // ('same' = unchanged). played: the player's own button must still work.
 // blocked: kinds PopShield must log. baseline: what Chrome alone does.
+// act: one action, or several separated by spaces ("rclick:#play wait:300 play").
+// wait: extra ms to settle (delayed attacks). adTab: true = some new tab must be at
+// the ad page, false = none may be. knownBypass: an attack PopShield does NOT stop
+// yet — run and reported, but it doesn't fail the suite (note says why).
 const CASES = [
   // ------------------------------------------------------------ attacks
   { t: 'doc-click-popunder', act: 'play', tabs: 0, url: 'same', played: true, blocked: ['popup'], baseline: { tabs: 1 } },
@@ -88,6 +92,77 @@ const CASES = [
   { t: 'wrapper-div-popunder', act: 'play', tabs: 0, url: 'same', played: true, blocked: ['popup'], baseline: { tabs: 1 } },
   { t: 'legit-react17-root', act: '#btn', tabs: 1, url: 'same', blocked: [], baseline: { tabs: 1 } },
   { t: 'svg-link-dispatch', act: 'play', tabs: 0, url: 'same', played: true, blockedAny: ['scripted-link', 'new-tab'], baseline: { tabs: 1 } },
+
+  // ------------------------------------------------------------ red-team regressions (round 1)
+  { t: 'rt-prepare-stack-trace', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-bound-element-receiver', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-currenttarget-spoof', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-timer-redirect', act: 'play', tabs: 0, url: 'same', blocked: ['redirect'], baseline: { url: 'ad' } },
+  { t: 'rt-delayed-tab-under', act: 'play', wait: 1500, tabs: 0, url: 'same', blockedAny: ['popup', 'redirect'], baseline: { tabs: 1, url: 'ad' } },
+  { t: 'rt-overlay-link-pixel', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: { tabs: 1 } },
+  { t: 'rt-overlay-parent-opacity', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: { tabs: 1 } },
+  { t: 'rt-overlay-near-threshold', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: { tabs: 1 } },
+  { t: 'rt-nonce-leak-document-open', act: 'wait:300 play', tabs: 0, blockedAny: ['popup', 'new-tab'], baseline: { tabs: 1 },
+    note: 'main tab URL is unchanged by document.open(); checked as "same"' },
+  { t: 'rt-poison-trim', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: { tabs: 1 } },
+  { t: 'rt-poison-regexp', act: 'play', tabs: 0, url: 'same', blocked: ['redirect'], baseline: { url: 'ad' } },
+  { t: 'rt-poison-useractivation', act: 'play', tabs: 0, url: 'same', blocked: ['redirect'], baseline: { url: 'ad' } },
+  { t: 'rt-pristine-click', act: 'play', tabs: 0, url: 'same', blockedAny: ['scripted-link', 'new-tab'], baseline: { tabs: 1 } },
+  { t: 'rt-contextmenu-token-ride', act: 'rclick:#play wait:300 #play', tabs: 0, url: 'same', blockedAny: ['scripted-link', 'new-tab'], baseline: { tabs: 1 } },
+  { t: 'rt-svg-xlink-dispatch', act: 'play wait:200 play', tabs: 0, url: 'same', blockedAny: ['scripted-link', 'new-tab'], baseline: { adTab: true } },
+  { t: 'rt-transparent-xframe', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup', 'new-tab'], baseline: { tabs: 1 } },
+  { t: 'rt-frame-redirect-delayed', act: 'iframe', wait: 2500, tabs: 0, url: 'same', blocked: ['redirect'], dialog: 'beforeunload', baseline: { url: 'ad' } },
+  { t: 'rt-frame-redirect-blur-first', act: 'iframe', wait: 1000, tabs: 0, url: 'same', blocked: ['redirect'], dialog: 'beforeunload', baseline: { url: 'ad' } },
+  { t: 'rt-ctrl-anywhere-token', act: 'ctrl:#play', tabs: 0, url: 'same', blockedAny: ['scripted-link', 'new-tab'], baseline: { adTab: true } },
+  { t: 'rt-real-link-token-race', act: '#dl', tabs: 1, adTab: false, url: 'same', blockedAny: ['scripted-link', 'new-tab'], baseline: { tabs: 1, adTab: true },
+    note: "Chrome alone gives the click's one popup to the ad; with PopShield the user's own link opens and the ad tab is stopped" },
+  { t: 'rt-meta-refresh', act: 'play', tabs: 0, url: 'same', blocked: ['redirect'], baseline: { url: 'ad' } },
+  { t: 'rt-fake-jquery', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-fake-react-props', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 },
+    note: 'any page can plant __reactProps$ on the clicked node and call the wrapped handler from a page-wide listener (fwDepth > 0 skips the page-wide check)' },
+  { t: 'rt-wrapper-redirect', act: 'play', tabs: 0, url: 'same', blocked: ['redirect'], baseline: { url: 'ad' } },
+  { t: 'rt-hijack-legit-popup', act: '#share', wait: 1000, tabs: 1, adTab: false, url: 'same', blocked: ['redirect'], baseline: { tabs: 1, adTab: true } },
+  { t: 'rt-sandboxed-realm', act: 'play', tabs: 0, url: 'same', blockedAny: ['new-tab', 'scripted-link'], baseline: { tabs: 1 } },
+  // ------------------------------------------------------------ red-team regressions (round 2)
+  { t: 'rt-async-forge-redirector', act: 'play', wait: 500, tabs: 0, url: 'same', blockedAny: ['popup', 'new-tab'], baseline: { tabs: 1, adTab: true } },
+  { t: 'rt-redirector-navigation', act: 'play', wait: 500, tabs: 0, url: 'same', blocked: ['redirect'], baseline: { url: 'ad' } },
+  { t: 'rt-redirector-navigation', name: 'rt-redirector-navigation (strict)', mode: 'strict', act: 'play', wait: 500, tabs: 0, url: 'same', blocked: ['redirect'], baseline: null },
+  { t: 'rt-tabunder-pointerup-reset', act: 'play', wait: 4500, tabs: 1, adTab: false, url: 'same', blocked: ['redirect'], baseline: { tabs: 1, url: 'ad' } },
+  { t: 'rt-delayed-redirect', act: 'play', wait: 4500, tabs: 0, url: 'same', blocked: ['redirect'], baseline: { url: 'ad' }, knownBypass: true,
+    note: 'ACCEPTED TRADE-OFF in Smart mode: a redirect more than 5 s after a click (e.g. a payment page handing off to the bank) is allowed so checkouts keep working; Strict mode blocks it (see the strict case)' },
+  { t: 'rt-delayed-redirect', name: 'rt-delayed-redirect (strict)', mode: 'strict', act: 'play', wait: 4500, tabs: 0, url: 'same', blocked: ['redirect'], baseline: null,
+    note: 'same as above; in strict mode this is how the pointerup tab-under still lands (its tab is blocked, the delayed redirect is not)' },
+  { t: 'rt-tabunder-after-user-link', act: '#link', wait: 4500, tabs: 1, adTab: false, url: 'same', blocked: ['redirect'], baseline: { tabs: 1, url: 'ad' } },
+  { t: 'rt-tabunder-after-user-link', name: 'rt-tabunder-after-user-link (strict)', mode: 'strict', act: '#link', wait: 4500, tabs: 1, adTab: false, url: 'same', blocked: ['redirect'], baseline: null },
+  { t: 'rt-two-49pct-wrappers', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-closed-shadow-overlay', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-overlay-submit-button', act: 'play', tabs: 0, url: 'same', blockedAny: ['scripted-form'], baseline: { tabs: 1 } },
+  { t: 'rt-overlay-submit-button', name: 'rt-overlay-submit-button (strict)', mode: 'strict', act: 'play', tabs: 0, url: 'same', blockedAny: ['scripted-form'], baseline: null },
+  { t: 'rt-keystroke-requestsubmit', act: '#q key:a', tabs: 0, url: 'same', blockedAny: ['scripted-form'], baseline: { tabs: 1 } },
+  { t: 'rt-keystroke-requestsubmit', name: 'rt-keystroke-requestsubmit (strict)', mode: 'strict', act: '#q key:a', tabs: 0, url: 'same', blockedAny: ['scripted-form'], baseline: null },
+  { t: 'rt-small-invisible-xframe', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup', 'new-tab'], baseline: { tabs: 1 } },
+  { t: 'rt-xframe-opacity021-link', act: 'play', tabs: 0, url: 'same', blockedAny: ['overlay-link', 'new-tab'], baseline: { tabs: 1 } },
+  { t: 'rt-xframe-opacity021-link', name: 'rt-xframe-opacity021-link (strict)', mode: 'strict', act: 'play', tabs: 0, url: 'same', blockedAny: ['overlay-link', 'new-tab'], baseline: null },
+  { t: 'rt-grid-overlay-link', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: { tabs: 1 } },
+  { t: 'rt-grid-overlay-link', name: 'rt-grid-overlay-link (strict)', mode: 'strict', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: null },
+  { t: 'rt-overlay-transparent-text', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: { tabs: 1 } },
+  { t: 'rt-overlay-transparent-gradient', act: 'play', tabs: 0, url: 'same', blocked: ['overlay-link'], baseline: { tabs: 1 } },
+  { t: 'rt-overlay-detach-before-open', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-wrapper-shrink-before-open', act: 'play', tabs: 0, url: 'same', blockedAny: ['popup'], baseline: { tabs: 1 } },
+  { t: 'rt-requestsubmit-formtarget', act: 'play', wait: 300, tabs: 0, url: 'same', blockedAny: ['scripted-form'], baseline: { tabs: 1, adTab: true } },
+  { t: 'rt-submitter-click-post', act: 'play', wait: 300, tabs: 0, url: 'same', blockedAny: ['scripted-form'], baseline: { tabs: 1, adTab: true } },
+  { t: 'rt-frame-redirect-after-4s', act: 'iframe', wait: 4500, tabs: 0, url: 'same', blocked: ['redirect'], dialog: 'beforeunload', baseline: { url: 'ad' } },
+  // ------------------------------------------------------------ red-team round 3 (still open)
+  { t: 'rt-tabunder-samesite-hop', act: '#link', wait: 8500, tabs: 1, adTab: false, url: 'hop', blocked: ['redirect'], baseline: { tabs: 1, url: 'ad' },
+    note: "the 60 s tab-under window lives in the opener's document; a same-site hop erases it and the 8 s redirect watch has expired by the time the hop page redirects" },
+  { t: 'rt-tabunder-samesite-hop', name: 'rt-tabunder-samesite-hop (strict)', mode: 'strict', act: '#link', wait: 8500, tabs: 1, adTab: false, url: 'hop', blocked: ['redirect'], baseline: null,
+    note: 'same, in strict mode' },
+  { t: 'rt-link-href-swap-redirector', act: '#link', wait: 500, tabs: 1, adTab: false, url: 'same', blockedAny: ['new-tab'], baseline: { tabs: 1, adTab: true },
+    note: 'user-link tokens are bound by site and never followed: an href swapped to a same-site redirector during the click lands on the ad' },
+  { t: 'rt-link-href-swap-redirector', name: 'rt-link-href-swap-redirector (strict)', mode: 'strict', act: '#link', wait: 500, tabs: 1, adTab: false, url: 'same', blockedAny: ['new-tab'], baseline: null,
+    note: 'same, in strict mode' },
+  { t: 'legit-closed-shadow-link', act: '#host', tabs: 1, url: 'same', blocked: [], baseline: { tabs: 1 } },
+  { t: 'legit-closed-shadow-link', name: 'mode-strict: closed-shadow link still works', mode: 'strict', act: '#host', tabs: 1, url: 'same', blocked: [], baseline: null },
   // ------------------------------------------------------------ modes
   { t: 'doc-click-popunder', name: 'mode-off: popunder allowed', mode: 'off', act: 'play', tabs: 1, url: 'same', played: true, blocked: [], baseline: null },
   { t: 'click-redirect', name: 'mode-off: redirect allowed', mode: 'off', act: 'play', tabs: 0, url: 'ad', blocked: [], baseline: null },
@@ -148,7 +223,15 @@ async function center(page, sel) {
 }
 
 async function act(page, how) {
+  if (how.includes(' ')) { for (const step of how.split(' ')) await act(page, step); return; }
   if (how === 'none') return;
+  if (how.startsWith('wait:')) return page.waitForTimeout(+how.slice(5));
+  if (how.startsWith('key:')) return page.keyboard.press(how.slice(4));
+  if (how.startsWith('rclick:')) {
+    const c = await center(page, how.slice(7));
+    await page.mouse.click(c.x, c.y, { button: 'right' });
+    return page.keyboard.press('Escape');
+  }
   if (how === 'play') { const c = await center(page, '#play'); return page.mouse.click(c.x, c.y); }
   if (how === 'iframe') {
     const b = await page.frameLocator('#pf').locator('#ctrl').boundingBox();
@@ -204,6 +287,7 @@ function urlKind(u, start) {
   if (u === start) return 'same';
   if (u.includes('/ad.html')) return 'ad';
   if (u.includes('/other.html')) return 'other';
+  if (u.includes('/rt-hop.html')) return 'hop';
   return u;
 }
 
@@ -230,7 +314,7 @@ async function runCase(env, c, withExt) {
   if (c.act.startsWith('iframe')) await page.frameLocator('#pf').locator('#ctrl').waitFor();
   await page.waitForTimeout(250); // let the bridge deliver the mode
   await act(page, c.act);
-  await page.waitForTimeout(SETTLE);
+  await page.waitForTimeout(SETTLE + (c.wait || 0));
 
   const others = ctx.pages().filter((p) => p !== page && !isExtPage(p));
   const res = {
@@ -260,6 +344,9 @@ function check(c, r, withExt) {
   if (exp.tabs !== undefined && r.tabs !== exp.tabs) fails.push(`tabs ${r.tabs} (want ${exp.tabs}) ${r.tabUrls.join(' ')}`);
   const wantUrl = exp.url || 'same';
   if (r.url !== wantUrl) fails.push(`main tab at "${r.url}" (want "${wantUrl}")`);
+  const adTabs = r.tabUrls.filter((u) => u.includes('/ad.html')).length;
+  if (exp.adTab === true && !adTabs) fails.push(`no tab reached the ad page (${r.tabUrls.join(' ') || 'no tabs'})`);
+  if (exp.adTab === false && adTabs) fails.push(`${adTabs} tab(s) at the ad page`);
   if (withExt) {
     if (c.played && !r.played) fails.push('player button stopped working');
     if (c.iframePlayed && !r.iframePlayed) fails.push('iframe player button stopped working');
@@ -278,7 +365,7 @@ function check(c, r, withExt) {
 
 // Rough per-case wall time, used to start the slow cases first (longest-first scheduling).
 function cost(c) {
-  let ms = SETTLE + 600;
+  let ms = SETTLE + 600 + (c.wait || 0);
   if (c.act === 'iframe-human-x2') ms += 2700;
   else if (c.act.startsWith('iframe-wait')) ms += 2200;
   else if (c.act.startsWith('iframe') || c.act.startsWith('frame:')) ms += 400;
@@ -348,7 +435,7 @@ try {
   stop();
 }
 
-let failed = 0;
+let failed = 0, knownOpen = 0, knownFixed = 0;
 for (const withExt of [false, true]) {
   const list = jobs[withExt];
   if (!list.length) continue;
@@ -358,10 +445,16 @@ for (const withExt of [false, true]) {
     const { r, fails } = results.get(x.i);
     const c = x.c;
     const detail = !r ? '' : withExt ? `  blocked: [${r.blocked.map((b) => `${b.kind}/${b.reason}`).join(', ')}]` : `  tabs=${r.tabs} url=${r.url}`;
-    console.log(`${fails.length ? 'FAIL' : 'pass'}  ${x.name}${detail}${c.note && withExt ? `\n      note: ${c.note}` : ''}`);
+    // A known, still-open bypass is reported but doesn't fail the run (its baseline still must).
+    const known = withExt && c.knownBypass;
+    const status = known ? (fails.length ? 'OPEN' : 'FIXD') : fails.length ? 'FAIL' : 'pass';
+    console.log(`${status}  ${x.name}${known ? '  [known bypass]' : ''}${detail}${c.note && withExt ? `\n      note: ${c.note}` : ''}`);
     for (const f of fails) console.log('      - ' + f);
-    if (fails.length) failed++;
+    if (known && !fails.length) console.log('      - now blocked: drop knownBypass from this case');
+    if (known) { if (fails.length) knownOpen++; else knownFixed++; } else if (fails.length) failed++;
   }
 }
-console.log(`\n${total - failed}/${total} checks passed (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+const known = knownOpen + knownFixed;
+console.log(`\n${total - known - failed}/${total - known} checks passed (${((Date.now() - t0) / 1000).toFixed(1)}s)` +
+  (known ? `; known bypasses: ${knownOpen} still open, ${knownFixed} now blocked (not counted)` : ''));
 process.exit(failed ? 1 : 0);

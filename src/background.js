@@ -15,7 +15,7 @@ const LOG_MAX = 50;
 
 const KINDS = new Set(['popup', 'new-tab', 'overlay-link', 'scripted-link', 'scripted-form', 'redirect']);
 const REASONS = new Set(['page-wide-listener', 'invisible-overlay', 'ad-layer', 'ad-box-frame', 'no-gesture',
-  'non-activating-event', 'strict-mode', 'no-user-intent', 'embedded-frame', 'tab-under', 'popup-hijack', 'redirect-chain']);
+  'non-activating-event', 'strict-mode', 'no-user-intent', 'embedded-frame', 'tab-under', 'popup-hijack', 'redirect-chain', 'link-swapped']);
 const ALLOW_HOWS = new Set(['popup', 'scripted-link', 'scripted-form', 'user-link', 'user-form', 'contextmenu']);
 
 // ------------------------------------------------------------ rate limits
@@ -35,7 +35,10 @@ function addToken(tabId, frameId, how, url, sameSiteOnly, weak) {
   // A click that went into a large, near-invisible frame isn't trusted.
   if (frameId !== 0 && Date.now() - (frameOverlayAt.get(tabId) || 0) < 1500) return;
   const arr = (tokens.get(tabId) || []).filter((t) => t.exp > Date.now());
-  arr.push({ exp: Date.now() + (how === 'contextmenu' ? CONTEXTMENU_TTL : TOKEN_TTL), url, sameSiteOnly: !!sameSiteOnly, frameId, weak: !!weak });
+  // A link the user clicked must open at exactly that page: a script swapping
+  // the address mid-click (even to a same-site redirector) doesn't fit.
+  const exact = how === 'user-link' || how === 'contextmenu';
+  arr.push({ exp: Date.now() + (how === 'contextmenu' ? CONTEXTMENU_TTL : TOKEN_TTL), url, sameSiteOnly: !!sameSiteOnly, frameId, weak: !!weak, exact });
   while (arr.length > MAX_TOKENS) arr.shift();
   tokens.set(tabId, arr);
 }
@@ -46,8 +49,21 @@ function tokenFits(t, url, srcSite) {
   if (!t.url) return true;
   if (isBlank(t.url)) return isBlank(url);
   if (isBlank(url)) return false;
+  if (t.exact) {
+    try { const a = new URL(t.url), b = new URL(url); return a.origin === b.origin && a.pathname === b.pathname; } catch { return false; }
+  }
   const ts = PS.siteOfUrl(t.url);
   return !!ts && ts === site;
+}
+// The user clicked a real link but the tab is opening somewhere else: a script
+// swapped the link's address during the click. Returns that link token.
+function takeSwappedLink(tabId, url) {
+  const arr = (tokens.get(tabId) || []).filter((t) => t.exp > Date.now());
+  // (Not for decoy "#" links: their "real" target is just this page.)
+  const i = arr.findIndex((t) => t.exact && !t.sameSiteOnly && t.url && /^https?:/.test(t.url) && t.url !== url);
+  const tok = i >= 0 ? arr.splice(i, 1)[0] : null;
+  tokens.set(tabId, arr);
+  return tok;
 }
 // Consume one token for a new tab opened at `url` from a page on `srcSite`;
 // returns the token (or null).
@@ -73,6 +89,9 @@ function landingOk(url, allowed) {
   return allowed.has(site) || (PS.PROVIDERS.has(site) && PS.looksLikeAuthOrPay(url));
 }
 const restoring = new Set(); // tabs we are sending back: keep their log
+// When a tab last opened another tab. Kept here (not in the page) so a hop to
+// another page of the same site can't make the opener "forget" it.
+const newTabAt = new Map(); // tabId -> Date.now()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------- stats (local only)
@@ -154,7 +173,7 @@ function cleanUrl(u) { try { const x = new URL(u); return x.origin + x.pathname;
 const clamp = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
 
 // ------------------------------------------------------- messages
-chrome.runtime.onMessage.addListener((msg, sender) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object' || sender.id !== chrome.runtime.id || !sender.tab) return;
   const tabId = sender.tab.id;
   if (typeof tabId !== 'number' || tabId < 0) return;
@@ -172,6 +191,12 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     // A child frame saw the user press the pointer: tell the top frame.
     if (sender.frameId === 0 || overLimit(tabId, 'frameGesture', 4, 1000)) return;
     chrome.tabs.sendMessage(tabId, { type: 'frameGesture' }, { frameId: 0 }).catch(() => {});
+  } else if (msg.type === 'tabState') {
+    // A top frame asks at startup: did this tab open another tab recently?
+    if (sender.frameId !== 0) return;
+    const at = newTabAt.get(tabId);
+    sendResponse({ newTabAgo: at ? Date.now() - at : null });
+    return;
   } else if (msg.type === 'watchNav') {
     // The top frame let a suspicious same-site navigation through: follow it.
     if (sender.frameId !== 0) return;
@@ -204,6 +229,7 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
   if (!tok) { await sleep(GRACE); tok = takeToken(d.sourceTabId, d.url, site); }
   if (tok) {
     // Tell the opener's top frame: redirects of that tab now look like tab-unders.
+    newTabAt.set(d.sourceTabId, Date.now());
     chrome.tabs.sendMessage(d.sourceTabId, { type: 'newTab' }, { frameId: 0 }).catch(() => {});
     if (tok.weak || tok.sameSiteOnly) {
       const allowed = new Set([site, PS.siteOfUrl(tok.url || '') || site].filter(Boolean));
@@ -211,7 +237,15 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async (d) => {
     }
     return;
   }
-  try { await chrome.tabs.remove(d.tabId); } catch { return; }
+  const swapped = takeSwappedLink(d.sourceTabId, d.url);
+  let tab = null;
+  try { tab = await chrome.tabs.get(d.tabId); await chrome.tabs.remove(d.tabId); } catch { return; }
+  if (swapped) {
+    // Close the ad, open the page the user actually clicked.
+    chrome.tabs.create({ url: swapped.url, index: tab ? tab.index : undefined, openerTabId: d.sourceTabId, active: tab ? tab.active : false }).catch(() => {});
+    logBlocked(d.sourceTabId, { kind: 'new-tab', reason: 'link-swapped', url: clamp(d.url, 2000) });
+    return;
+  }
   logBlocked(d.sourceTabId, { kind: 'new-tab', reason: 'no-user-intent', url: clamp(d.url, 2000) });
 });
 
@@ -249,6 +283,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   frameOverlayAt.delete(tabId);
   tabWatch.delete(tabId);
   navWatch.delete(tabId);
+  newTabAt.delete(tabId);
   restoring.delete(tabId);
   for (const k of buckets.keys()) if (k.startsWith(tabId + '|')) buckets.delete(k);
   clearTab(tabId);

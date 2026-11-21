@@ -522,6 +522,14 @@
       if (m && m.type === 'frameGesture') lastFrameGesture = Date.now();
       else if (m && m.type === 'newTab') lastNewTabAt = performance.now(); // opened from any frame of this tab
     });
+    // A new page in this tab: did the tab open another one recently?
+    try {
+      chrome.runtime.sendMessage({ type: 'tabState' }).then((r) => {
+        if (r && typeof r.newTabAgo === 'number' && r.newTabAgo < 60000) {
+          lastNewTabAt = Math.max(lastNewTabAt, performance.now() - r.newTabAgo);
+        }
+      }).catch(() => {});
+    } catch {}
     window.addEventListener('blur', onTopBlur, true);
     function onTopBlur() {
       const a = document.activeElement;
@@ -561,6 +569,9 @@
       if (performance.now() - lastNewTabAt < 60000 && lastPressAt < lastNewTabAt + 500) return 'tab-under';
       // A popup we allowed is being sent elsewhere before anyone used it.
       if (!gestures && window.opener) return 'popup-hijack';
+      // Strict: once the user has interacted with this page, a script may not
+      // send the tab to another site on its own, however long it waits.
+      if (modeIs('strict') && gestures && !inDispatch()) return 'strict-mode';
       if (!activationActive()) return null;                 // not interaction-driven (e.g. on-load redirect)
       const v = gestureVerdict();
       if (v === 'ok') return modeIs('strict') && !inDispatch() ? 'strict-mode' : null;

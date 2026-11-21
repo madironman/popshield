@@ -274,6 +274,39 @@
   const reactKeys = []; // '__reactProps$<random>' names seen on this page (one per React copy)
   const selCount = new Map(); // selector -> document-wide match count, for one gesture (cleared next task)
   let selCountQueued = false;
+  // Only framework props that were already on the element when the user
+  // pressed count: a page can't plant fake ones in its own press handler.
+  // (Keyboard activation has no press snapshot for the clicked element's
+  // props if focus moved by script, so Enter/Space trust the keydown snapshot.)
+  let propsAtPress = new WSet();
+  function atPress(props) { return R_apply(wsHas, propsAtPress, [props]); }
+  const dateNow = Date.now;
+  let lastPointerDown = 0;
+  function onPress(e) {
+    if (!e.isTrusted || mode === 'off') return;
+    // One snapshot per physical press: the compatibility mousedown fires after
+    // pointerdown, when page handlers may already have planted fake props.
+    let type = '';
+    try { type = R_apply(evType, e, []); } catch { return; }
+    const now = R_apply(dateNow, Date, []);
+    if (type === 'pointerdown') lastPointerDown = now;
+    else if (type === 'mousedown' && now - lastPointerDown < 1000) return;
+    let path;
+    try { path = R_apply(origComposedPath, e, []); } catch { return; }
+    propsAtPress = new WSet();
+    const body = D.body, html = D.documentElement;
+    for (let i = 0; i < path.length; i++) {
+      const n = path[i];
+      if (n === W || n === D || n === body || n === html || n == null || typeof n !== 'object') continue;
+      let keys;
+      try { keys = ObjKeys(n); } catch { continue; }
+      for (let j = 0; j < keys.length; j++) {
+        if (R_apply(strStartsWith, keys[j], ['__react'])) {
+          try { const v = n[keys[j]]; if (v && typeof v === 'object') R_apply(wsAdd, propsAtPress, [v]); } catch {}
+        }
+      }
+    }
+  }
   function attributeFrameworks(type, path) {
     const names = HANDLER_PROPS[type];
     if (!names) return;
@@ -288,7 +321,7 @@
       let known = false;
       for (let r = 0; r < reactKeys.length; r++) {
         let props; try { props = n[reactKeys[r]]; } catch {}
-        if (props && typeof props === 'object') { known = true; for (let q = 0; q < names.length; q++) wrapHandler(props, names[q]); }
+        if (props && typeof props === 'object') { known = true; if (atPress(props)) for (let q = 0; q < names.length; q++) wrapHandler(props, names[q]); }
       }
       if (known) continue;
       let keys;
@@ -299,7 +332,7 @@
         if (R_apply(strStartsWith, k, ['__reactProps$']) || R_apply(strStartsWith, k, ['__reactEventHandlers$'])) {
           if (reactKeys.length < 4) { let seen = false; for (let r = 0; r < reactKeys.length; r++) if (reactKeys[r] === k) seen = true; if (!seen) reactKeys[reactKeys.length] = k; }
           let props; try { props = n[k]; } catch {}
-          if (props && typeof props === 'object') for (let q = 0; q < names.length; q++) wrapHandler(props, names[q]);
+          if (props && typeof props === 'object' && atPress(props)) for (let q = 0; q < names.length; q++) wrapHandler(props, names[q]);
         } else if (k === solidKey) {
           wrapHandler(n, k); // Solid's delegated handler
         }
@@ -365,7 +398,11 @@
     attributeFrameworks(type, path);
   }
   const ATTRIBUTION_EVENTS = ['click', 'auxclick', 'dblclick', 'mouseup', 'pointerup', 'touchend', 'keydown', 'keyup'];
+  const PRESS_EVENTS = ['pointerdown', 'mousedown', 'touchstart', 'keydown'];
   function armRealm(win) {
+    for (let i = 0; i < PRESS_EVENTS.length; i++) {
+      try { R_apply(origAddEL, win, [PRESS_EVENTS[i], onPress, true]); } catch {}
+    }
     for (let i = 0; i < ATTRIBUTION_EVENTS.length; i++) {
       try { R_apply(origAddEL, win, [ATTRIBUTION_EVENTS[i], onGesture, true]); } catch {}
     }

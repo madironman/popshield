@@ -24,6 +24,7 @@ const REASONS = {
   'tab-under': 'opened this page again and tried to turn this tab into an ad',
   'popup-hijack': 'a popup was sent to another site before you used it',
   'redirect-chain': 'went through a redirect that ended on an unrelated site',
+  'link-swapped': 'a script swapped the link you clicked for an ad; the real link was opened instead',
 };
 
 const $ = (s) => document.querySelector(s);
