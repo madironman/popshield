@@ -22,9 +22,11 @@
     "test:ui": "node test/popup-ui.mjs",
     "package": "node scripts/package.mjs",
     "version:bump": "node scripts/bump-version.mjs",
-    "version:check": "node scripts/check-version.mjs"
+    "version:check": "node scripts/check-version.mjs",
+    "dev": "node scripts/dev-chrome.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.65.1"
+    "@types/chrome": "0.3.7",
+    "playwright": "1.65.1"
   }
 }

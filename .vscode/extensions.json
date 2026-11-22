@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "EditorConfig.EditorConfig",
+    "usernamehw.errorlens",
+    "ms-playwright.playwright",
+    "redhat.vscode-yaml",
+    "github.vscode-github-actions",
+    "bierner.markdown-mermaid",
+    "DavidAnson.vscode-markdownlint",
+    "streetsidesoftware.code-spell-checker"
+  ]
+}

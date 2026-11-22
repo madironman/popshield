@@ -1,0 +1,13 @@
+{
+  "//": "Editor support only (autocomplete for chrome.* APIs, go-to-definition). There is no build step; nothing here changes the shipped extension.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "checkJs": false,
+    "types": ["chrome"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"]
+  },
+  "include": ["src/**/*.js", "scripts/**/*.mjs", "test/**/*.mjs", "test/**/*.js", "store/image-src/*.mjs"],
+  "exclude": ["node_modules", "dist"]
+}

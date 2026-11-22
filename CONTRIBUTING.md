@@ -52,6 +52,7 @@ npm test                         # e2e suite + popup UI test
 npm run test:e2e                 # only test/run.mjs
 npm run test:e2e -- tab-under    # only cases whose name contains "tab-under"
 npm run test:ui                  # only test/popup-ui.mjs
+npm run dev -- doc-click-popunder   # visible Chromium with PopShield loaded on one local scenario
 ```
 
 Every test runs on local fixture pages served from your own machine. No test
